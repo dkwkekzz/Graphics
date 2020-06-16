@@ -3,6 +3,9 @@
 #include "DX12Engine.h"
 #include "SystemBase.h"
 #include "d3dUtil.h"
+#include "World.h"
+
+static std::unique_ptr<World> world = nullptr;
 
 int DX12Engine::Run(HINSTANCE hInstance)
 {
@@ -13,6 +16,8 @@ int DX12Engine::Run(HINSTANCE hInstance)
 
     try
     {
+        world = std::make_unique<World>();
+
         SystemBase system(hInstance);
         if (!system.Init())
             return 0;

@@ -22,7 +22,7 @@ public:
 	void Init(GL* gl);
 	void Reset(TPSO* initialState);
 	void Begin();
-	void Render(const FrameResource* frameRes, const RenderBundle* bundle);
+	void Render(const FrameResource* currentFrameRes, const RenderBundle* bundle);
 	void End();
 
 private:

@@ -69,30 +69,32 @@ void CommandObject::Begin()
 	mCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 }
 
-void CommandObject::Render(const FrameResource* frameRes, const RenderBundle* bundle)
+void CommandObject::Render(const FrameResource* currentFrameRes, const RenderBundle* bundle)
 {
-	auto passCB = frameRes->PassCB->Resource();
+	auto passCB = currentFrameRes->PassCB->Resource();
 	D3D12_GPU_VIRTUAL_ADDRESS passCBAddress = passCB->GetGPUVirtualAddress() + bundle->passCBIndex * m_passCBByteSize;
 	mCommandList->SetGraphicsRootConstantBufferView(Global::PASSCB_PARAMETER_INDEX, passCBAddress);
 
-	if (m_lastPipelineState != ctx.pipelineState)
+	auto* bundleState = bundle->pipelineState;
+	if (m_lastPipelineState != bundleState)
 	{
-		mCommandList->SetPipelineState(ctx.pipelineState);
-		m_lastPipelineState = ctx.pipelineState;
+		mCommandList->SetPipelineState(bundleState);
+		m_lastPipelineState = bundleState;
 	}
 
-	if (ctx.useStencil)
+	if (bundle->useStencil)
 	{
-		mCommandList->OMSetStencilRef(ctx.stencilRef);
+		mCommandList->OMSetStencilRef(bundle->stencilRef);
 	}
 
-	auto objectCB = frameRes->ObjectCB->Resource();
-	auto matCB = frameRes->MaterialCB->Resource();
+	auto objectCB = currentFrameRes->ObjectCB->Resource();
+	auto matCB = currentFrameRes->MaterialCB->Resource();
 
 	// For each render item...
-	for (size_t i = 0; i < ctx.ritemCount; ++i)
+	const auto& ritems = bundle->ritems;
+	for (size_t i = 0; i < ritems.size(); ++i)
 	{
-		auto ri = ctx.ritems[i];
+		auto ri = ritems[i];
 
 		mCommandList->IASetVertexBuffers(0, 1, &ri->Geo->VertexBufferView());
 		mCommandList->IASetIndexBuffer(&ri->Geo->IndexBufferView());

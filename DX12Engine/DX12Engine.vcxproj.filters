@@ -63,6 +63,13 @@
     <ClInclude Include="GeometryMap.h" />
     <ClInclude Include="GeometryGenerator.h" />
     <ClInclude Include="RenderPass.h" />
+    <ClInclude Include="CommandObject.h" />
+    <ClInclude Include="GL.h" />
+    <ClInclude Include="PSOMap.h" />
+    <ClInclude Include="RenderLayers.h" />
+    <ClInclude Include="ShaderMap.h" />
+    <ClInclude Include="TypeDefine.h" />
+    <ClInclude Include="RenderItem.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />
@@ -112,6 +119,12 @@
     <ClCompile Include="GeometryMap.cpp" />
     <ClCompile Include="GeometryGenerator.cpp" />
     <ClCompile Include="RenderPass.cpp" />
+    <ClCompile Include="CommandObject.cpp" />
+    <ClCompile Include="GL.cpp" />
+    <ClCompile Include="PSOMap.cpp" />
+    <ClCompile Include="RenderLayers.cpp" />
+    <ClCompile Include="ShaderMap.cpp" />
+    <ClCompile Include="World.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="src">

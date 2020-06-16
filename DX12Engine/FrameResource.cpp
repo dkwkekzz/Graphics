@@ -1,7 +1,7 @@
 
 #include "pch.h"
 #include "FrameResource.h"
-#include "GL.h"
+#include "GlobalVar.h"
 
 FrameResource::FrameResource(GL* gl, UINT passCount, UINT objectCount, UINT materialCount)
 {
@@ -16,5 +16,12 @@ FrameResource::FrameResource(GL* gl, UINT passCount, UINT objectCount, UINT mate
 
 FrameResource::~FrameResource()
 {
+}
 
+void FrameResourceQueue::Init(GL* gl, int numFrameResources, int maxObjCount, int maxMatCount)
+{
+    for (int i = 0; i < numFrameResources; ++i)
+    {
+        mFrameResources.push_back(std::make_unique<FrameResource>(gl, Global::MAIN_PASS_COUNT, (UINT)maxObjCount, (UINT)maxMatCount));
+    }
 }

@@ -155,6 +155,7 @@
   <ItemGroup>
     <ClInclude Include="Camera.h" />
     <ClInclude Include="CD3D12.h" />
+    <ClInclude Include="CommandObject.h" />
     <ClInclude Include="d3dUtil.h" />
     <ClInclude Include="d3dx12.h" />
     <ClInclude Include="DDSTextureLoader.h" />
@@ -165,12 +166,17 @@
     <ClInclude Include="GameTimer.h" />
     <ClInclude Include="GeometryGenerator.h" />
     <ClInclude Include="GeometryMap.h" />
+    <ClInclude Include="GL.h" />
     <ClInclude Include="GlobalVar.h" />
     <ClInclude Include="Input.h" />
     <ClInclude Include="MaterialMap.h" />
     <ClInclude Include="MathHelper.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="PSOMap.h" />
+    <ClInclude Include="RenderItem.h" />
+    <ClInclude Include="RenderLayers.h" />
     <ClInclude Include="RenderPass.h" />
+    <ClInclude Include="ShaderMap.h" />
     <ClInclude Include="src\Camera.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
     </ClInclude>
@@ -213,12 +219,14 @@
     <ClInclude Include="SystemBase.h" />
     <ClInclude Include="Logic.h" />
     <ClInclude Include="TextureMap.h" />
+    <ClInclude Include="TypeDefine.h" />
     <ClInclude Include="UploadBuffer.h" />
     <ClInclude Include="World.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Camera.cpp" />
     <ClCompile Include="CD3D12.cpp" />
+    <ClCompile Include="CommandObject.cpp" />
     <ClCompile Include="d3dUtil.cpp" />
     <ClCompile Include="DDSTextureLoader.cpp" />
     <ClCompile Include="DescriptorHeap.cpp" />
@@ -229,6 +237,7 @@
     <ClCompile Include="GameTimer.cpp" />
     <ClCompile Include="GeometryGenerator.cpp" />
     <ClCompile Include="GeometryMap.cpp" />
+    <ClCompile Include="GL.cpp" />
     <ClCompile Include="Input.cpp" />
     <ClCompile Include="MaterialMap.cpp" />
     <ClCompile Include="MathHelper.cpp" />
@@ -238,7 +247,10 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="PSOMap.cpp" />
+    <ClCompile Include="RenderLayers.cpp" />
     <ClCompile Include="RenderPass.cpp" />
+    <ClCompile Include="ShaderMap.cpp" />
     <ClCompile Include="src\Camera.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
     </ClCompile>
@@ -269,6 +281,7 @@
     <ClCompile Include="SystemBase.cpp" />
     <ClCompile Include="Logic.cpp" />
     <ClCompile Include="TextureMap.cpp" />
+    <ClCompile Include="World.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

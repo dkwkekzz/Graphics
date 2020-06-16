@@ -62,3 +62,16 @@ public:
     // check if these frame resources are still in use by the GPU.
     UINT64 Fence = 0;
 };
+
+class FrameResourceQueue
+{
+public:
+    void Init(GL* gl, int numFrameResources, int maxObjCount, int maxMatCount);
+    inline const FrameResource* SetNextFrame() { mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources; }
+    inline const FrameResource* GetCurrentFrameResource() const { return mFrameResources[mCurrFrameResourceIndex].get(); }
+
+private:
+    std::vector<std::unique_ptr<FrameResource>> mFrameResources;
+    int mCurrFrameResourceIndex = 0;
+
+};
