@@ -3,20 +3,10 @@
 #include "RenderItem.h"
 
 class GL;
-
-enum class RenderLayer : int
-{
-	Opaque = 0,
-	Mirrors,
-	Reflected,
-	Transparent,
-	Shadow,
-	Count
-};
+class PSOMap;
 
 struct RenderBundle
 {
-	TSignature* rootSignature;
 	TPSO* pipelineState;
 	int passCBIndex;
 	std::vector<RenderItem*> ritems;
@@ -27,14 +17,11 @@ struct RenderBundle
 class RenderLayers
 {
 public:
-	void Init(GL* gl);
-	void AddItem();
+	inline const RenderBundle* GetBundle(RenderLayer layer) { return mRitemLayer[(int)layer].get(); }
+	void Init(GL* gl, PSOMap* psos);
+	void AddItem(RenderLayer layer, Matrix matrix, Material* material, MeshGeometry* mesh, int submeshIdx = 0);
 
 private:
-	void BuildRootSignature(GL* gl);
-
-private:
-	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_defaultRootSignature;
 	std::unique_ptr<RenderBundle> mRitemLayer[(int)RenderLayer::Count];
 	std::vector<std::unique_ptr<RenderItem>> mAllRitems;
 

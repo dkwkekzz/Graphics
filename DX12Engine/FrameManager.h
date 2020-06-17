@@ -4,6 +4,8 @@
 #include "MathHelper.h"
 #include "UploadBuffer.h"
 
+class GL;
+
 struct ObjectConstants
 {
     DirectX::XMFLOAT4X4 World = MathHelper::Identity4x4();
@@ -40,7 +42,7 @@ struct Vertex
 struct FrameResource
 {
 public:
-    FrameResource(ID3D12Device* device, UINT passCount, UINT objectCount, UINT materialCount);
+    FrameResource(GL* gl, UINT passCount, UINT objectCount, UINT materialCount);
     FrameResource(const FrameResource& rhs) = delete;
     FrameResource& operator=(const FrameResource& rhs) = delete;
     ~FrameResource();
@@ -60,36 +62,16 @@ public:
     UINT64 Fence = 0;
 };
 
-class RenderPass
+class FrameManager
 {
 public:
-    void BuildRootSignature();
-    void BuildShadersAndInputLayout();
-    void BuildPSOs();
-    void BuildFrameResources();
+    inline const FrameResource* SetNextFrame() { mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources; }
+    inline const FrameResource* GetCurrentFrameResource() const { return mFrameResources[mCurrFrameResourceIndex].get(); }
+
+    void Init(GL* gl, int numFrameResources, int maxObjCount, int maxMatCount);
 
 private:
     std::vector<std::unique_ptr<FrameResource>> mFrameResources;
-    FrameResource* mCurrFrameResource = nullptr;
     int mCurrFrameResourceIndex = 0;
 
-    UINT mCbvSrvDescriptorSize = 0;
-
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
-
-    std::vector<D3D12_INPUT_ELEMENT_DESC> mInputLayout;
-
-    D3D_DRIVER_TYPE md3dDriverType = D3D_DRIVER_TYPE_HARDWARE;
-    DXGI_FORMAT mBackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-    DXGI_FORMAT mDepthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 };
-
-class IRenderPass
-{
-public:
-    virtual ~IRenderPass() = 0;
-
-protected:
-
-};
-

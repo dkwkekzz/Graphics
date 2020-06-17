@@ -1,38 +1,36 @@
 #pragma once
 #include "TypeDefine.h"
 
-class GL;
 struct FrameResource;
 struct RenderBundle;
-
-struct DrawContext
-{
-	FrameResource* frameRes;
-	TPSO* pipelineState;
-	int passCBIndex;
-	int ritemCount;
-	RenderItem* ritems;
-	bool useStencil;
-	int stencilRef;
-};
 
 class CommandObject
 {
 public:
-	void Init(GL* gl);
-	void Reset(TPSO* initialState);
-	void Begin();
+	CommandObject();
+	//void Reset(ID3D12CommandAllocator* allocator, TPSO* initialState);
+	void Begin(ID3D12CommandAllocator* allocator, TPSO* initialState);
 	void Render(const FrameResource* currentFrameRes, const RenderBundle* bundle);
-	void End();
+	void End(FrameResource* currentFrameRes);
+	void ResourceBarrier(TResource* res);
+	void Execute();
+	UINT64 Fence();
+	void WaitForEvent();
+	void Flush();
 
 private:
-	Microsoft::WRL::ComPtr<ID3D12CommandQueue> mCommandQueue;
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> mCmdListAlloc;
-	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> mCommandList;
+	const UINT m_passCBByteSize;
+	const UINT m_objCBByteSize;
+	const UINT m_matCBByteSize;
 
-	UINT m_passCBByteSize;
-	UINT m_objCBByteSize;
-	UINT m_matCBByteSize;
+	ID3D12CommandQueue* mCommandQueue;
+	//Microsoft::WRL::ComPtr<ID3D12CommandAllocator> mDirectCmdListAlloc;
+	ID3D12GraphicsCommandList* mCommandList;
+
 	TPSO* m_lastPipelineState = nullptr;
+
+	//Microsoft::WRL::ComPtr<ID3D12Fence> mFence;
+	//UINT64 mCurrentFence = 0L;
+
 };
 

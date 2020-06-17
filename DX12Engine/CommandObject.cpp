@@ -2,54 +2,32 @@
 #include "CommandObject.h"
 #include "GlobalVar.h"
 #include "GL.h"
-#include "FrameResource.h"
+#include "FrameManager.h"
 #include "RenderLayers.h"
 #include "RenderItem.h"
 
-void CommandObject::Init(GL * gl)
+static const UINT passCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(PassConstants));
+static const UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
+static const UINT matCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(MaterialConstants));
+
+CommandObject::CommandObject()
+	: m_passCBByteSize(d3dUtil::CalcConstantBufferByteSize(sizeof(PassConstants)))
+	, m_objCBByteSize(d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants)))
+	, m_matCBByteSize(d3dUtil::CalcConstantBufferByteSize(sizeof(MaterialConstants)))
 {
-	auto* device = gl->GetDevice();
-
-	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-	ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&mCommandQueue)));
-
-	ThrowIfFailed(device->CreateCommandAllocator(
-		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		IID_PPV_ARGS(mCmdListAlloc.GetAddressOf())));
-
-	ThrowIfFailed(device->CreateCommandList(
-		0,
-		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		mCmdListAlloc.Get(), // Associated command allocator
-		nullptr,                   // Initial PipelineStateObject
-		IID_PPV_ARGS(mCommandList.GetAddressOf())));
-
-	// Start off in a closed state.  This is because the first time we refer 
-	// to the command list we will Reset it, and it needs to be closed before
-	// calling Reset.
-	mCommandList->Close();
 }
 
-void CommandObject::Reset(TPSO* initialState)
+void CommandObject::Begin(ID3D12CommandAllocator* allocator, TPSO* initialState)
 {
-	// Reuse the memory associated with command recording.
-	// We can only reset when the associated command lists have finished execution on the GPU.
-	ThrowIfFailed(mCmdListAlloc->Reset());
-
 	// A command list can be reset after it has been added to the command queue via ExecuteCommandList.
 	// Reusing the command list reuses memory.
-	ThrowIfFailed(mCommandList->Reset(mCmdListAlloc.Get(), initialState));
+	ThrowIfFailed(mCommandList->Reset(allocator, initialState));
 
 	m_lastPipelineState = initialState;
 }
 
 void CommandObject::Begin()
 {
-	m_passCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(PassConstants));
-	m_objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(ObjectConstants));
-	m_matCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(MaterialConstants));
 
 	mCommandList->RSSetViewports(1, &mScreenViewport);
 	mCommandList->RSSetScissorRects(1, &mScissorRect);
@@ -71,6 +49,8 @@ void CommandObject::Begin()
 
 void CommandObject::Render(const FrameResource* currentFrameRes, const RenderBundle* bundle)
 {
+	mCommandList->SetGraphicsRootSignature(bundle->pipelineState->.Get());
+
 	auto passCB = currentFrameRes->PassCB->Resource();
 	D3D12_GPU_VIRTUAL_ADDRESS passCBAddress = passCB->GetGPUVirtualAddress() + bundle->passCBIndex * m_passCBByteSize;
 	mCommandList->SetGraphicsRootConstantBufferView(Global::PASSCB_PARAMETER_INDEX, passCBAddress);
@@ -114,7 +94,7 @@ void CommandObject::Render(const FrameResource* currentFrameRes, const RenderBun
 	}
 }
 
-void CommandObject::End()
+void CommandObject::End(FrameResource* currentFrameRes)
 {
 	// Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
@@ -131,10 +111,53 @@ void CommandObject::End()
 	ThrowIfFailed(mSwapChain->Present(0, 0));
 	mCurrBackBuffer = (mCurrBackBuffer + 1) % Global::SWAP_CHAIN_BUFFER_COUNT;
 
+}
+
+void CommandObject::ResourceBarrier(TResource* res)
+{
+	// Indicate a state transition on the resource usage.
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(res, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+}
+
+void CommandObject::Execute()
+{
+	// Done recording commands.
+	ThrowIfFailed(mCommandList->Close());
+
+	// Add the command list to the queue for execution.
+	ID3D12CommandList* cmdsLists[] = { mCommandList.Get() };
+	mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+}
+
+UINT64 CommandObject::Fence()
+{
 	// Advance the fence value to mark commands up to this fence point.
-	mCurrFrameResource->Fence = ++mCurrentFence;
+	mCurrentFence++;
 
 	// Notify the fence when the GPU completes commands up to this fence point.
 	mCommandQueue->Signal(mFence.Get(), mCurrentFence);
+
+	return mCurrentFence;
 }
 
+void CommandObject::WaitForEvent()
+{
+	// Wait until the GPU has completed commands up to this fence point.
+	if (mFence->GetCompletedValue() < mCurrentFence)
+	{
+		HANDLE eventHandle = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
+
+		// Fire event when GPU hits current fence.  
+		ThrowIfFailed(mFence->SetEventOnCompletion(mCurrentFence, eventHandle));
+
+		// Wait until the GPU hits current fence event is fired.
+		WaitForSingleObject(eventHandle, INFINITE);
+		CloseHandle(eventHandle);
+	}
+}
+
+void CommandObject::Flush()
+{
+	Fence();
+	WaitForEvent();
+}

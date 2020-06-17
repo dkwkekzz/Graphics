@@ -1,16 +1,5 @@
 #include "pch.h"
 #include "World.h"
-#include "GameTimer.h"
-#include "GL.h"
-#include "Camera.h"
-#include "DescriptorHeap.h"
-#include "TextureMap.h"
-#include "MaterialMap.h"
-#include "GeometryMap.h"
-#include "ShaderMap.h"
-#include "PSOMap.h"
-#include "CommandObject.h"
-#include "RenderLayers.h"
 
 using namespace std;
 
@@ -26,5 +15,6 @@ World::World() :
 ,	mPSOMap(make_unique<PSOMap>())
 ,	mCommandObject(make_unique<CommandObject>())
 ,	mRenderLayers(make_unique<RenderLayers>())
+,	mFrameManager(make_unique<FrameManager>())
 {
 }

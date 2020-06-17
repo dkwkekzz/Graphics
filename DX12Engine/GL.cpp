@@ -1,12 +1,13 @@
 #include "pch.h"
 #include "GL.h"
 #include "d3dUtil.h"
-#include "SystemBase.h"
 
 using namespace Microsoft::WRL;
 
-void GL::Init()
+void GL::Init(HWND mainWnd)
 {
+	mMainWnd = mainWnd;
+
 #if defined(DEBUG) || defined(_DEBUG) 
 	// Enable the D3D12 debug layer.
 	{
@@ -238,14 +239,12 @@ void GL::CreateCommandObjects()
 
 void GL::CreateSwapChain()
 {
-	auto* system = SystemBase::GetApp();
-
 	// Release the previous swapchain we will be recreating.
 	mSwapChain.Reset();
 
 	DXGI_SWAP_CHAIN_DESC sd;
-	sd.BufferDesc.Width = system->Width();
-	sd.BufferDesc.Height = system->Height();
+	sd.BufferDesc.Width = mClientWidth;
+	sd.BufferDesc.Height = mClientHeight;
 	sd.BufferDesc.RefreshRate.Numerator = 60;
 	sd.BufferDesc.RefreshRate.Denominator = 1;
 	sd.BufferDesc.Format = mBackBufferFormat;
@@ -255,7 +254,7 @@ void GL::CreateSwapChain()
 	sd.SampleDesc.Quality = m4xMsaaState ? (m4xMsaaQuality - 1) : 0;
 	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	sd.BufferCount = Global::SWAP_CHAIN_BUFFER_COUNT;
-	sd.OutputWindow = system->MainWnd();
+	sd.OutputWindow = mMainWnd;
 	sd.Windowed = true;
 	sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;

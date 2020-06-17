@@ -91,7 +91,7 @@
       <PreprocessorDefinitions>_DEBUG;DX12ENGINE_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>E:\develop\directx\DXGame\DX12Engine;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(TargetPath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -154,7 +154,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Camera.h" />
-    <ClInclude Include="CD3D12.h" />
     <ClInclude Include="CommandObject.h" />
     <ClInclude Include="d3dUtil.h" />
     <ClInclude Include="d3dx12.h" />
@@ -162,7 +161,7 @@
     <ClInclude Include="DescriptorHeap.h" />
     <ClInclude Include="Draw.h" />
     <ClInclude Include="DX12Engine.h" />
-    <ClInclude Include="FrameResource.h" />
+    <ClInclude Include="FrameManager.h" />
     <ClInclude Include="GameTimer.h" />
     <ClInclude Include="GeometryGenerator.h" />
     <ClInclude Include="GeometryMap.h" />
@@ -172,10 +171,11 @@
     <ClInclude Include="MaterialMap.h" />
     <ClInclude Include="MathHelper.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="Processes.h" />
+    <ClInclude Include="Properties.h" />
     <ClInclude Include="PSOMap.h" />
     <ClInclude Include="RenderItem.h" />
     <ClInclude Include="RenderLayers.h" />
-    <ClInclude Include="RenderPass.h" />
     <ClInclude Include="ShaderMap.h" />
     <ClInclude Include="src\Camera.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
@@ -225,7 +225,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Camera.cpp" />
-    <ClCompile Include="CD3D12.cpp" />
     <ClCompile Include="CommandObject.cpp" />
     <ClCompile Include="d3dUtil.cpp" />
     <ClCompile Include="DDSTextureLoader.cpp" />
@@ -233,7 +232,7 @@
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="Draw.cpp" />
     <ClCompile Include="DX12Engine.cpp" />
-    <ClCompile Include="FrameResource.cpp" />
+    <ClCompile Include="FrameManager.cpp" />
     <ClCompile Include="GameTimer.cpp" />
     <ClCompile Include="GeometryGenerator.cpp" />
     <ClCompile Include="GeometryMap.cpp" />
@@ -249,7 +248,6 @@
     </ClCompile>
     <ClCompile Include="PSOMap.cpp" />
     <ClCompile Include="RenderLayers.cpp" />
-    <ClCompile Include="RenderPass.cpp" />
     <ClCompile Include="ShaderMap.cpp" />
     <ClCompile Include="src\Camera.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>

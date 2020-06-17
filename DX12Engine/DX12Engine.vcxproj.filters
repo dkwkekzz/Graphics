@@ -50,7 +50,6 @@
     <ClInclude Include="d3dx12.h" />
     <ClInclude Include="DDSTextureLoader.h" />
     <ClInclude Include="MathHelper.h" />
-    <ClInclude Include="CD3D12.h" />
     <ClInclude Include="Draw.h" />
     <ClInclude Include="Input.h" />
     <ClInclude Include="Logic.h" />
@@ -59,10 +58,8 @@
     <ClInclude Include="TextureMap.h" />
     <ClInclude Include="MaterialMap.h" />
     <ClInclude Include="UploadBuffer.h" />
-    <ClInclude Include="FrameResource.h" />
     <ClInclude Include="GeometryMap.h" />
     <ClInclude Include="GeometryGenerator.h" />
-    <ClInclude Include="RenderPass.h" />
     <ClInclude Include="CommandObject.h" />
     <ClInclude Include="GL.h" />
     <ClInclude Include="PSOMap.h" />
@@ -70,6 +67,9 @@
     <ClInclude Include="ShaderMap.h" />
     <ClInclude Include="TypeDefine.h" />
     <ClInclude Include="RenderItem.h" />
+    <ClInclude Include="FrameManager.h" />
+    <ClInclude Include="Properties.h" />
+    <ClInclude Include="Processes.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />
@@ -107,7 +107,6 @@
     <ClCompile Include="d3dUtil.cpp" />
     <ClCompile Include="DDSTextureLoader.cpp" />
     <ClCompile Include="MathHelper.cpp" />
-    <ClCompile Include="CD3D12.cpp" />
     <ClCompile Include="Draw.cpp" />
     <ClCompile Include="Input.cpp" />
     <ClCompile Include="Logic.cpp" />
@@ -115,16 +114,15 @@
     <ClCompile Include="DescriptorHeap.cpp" />
     <ClCompile Include="TextureMap.cpp" />
     <ClCompile Include="MaterialMap.cpp" />
-    <ClCompile Include="FrameResource.cpp" />
     <ClCompile Include="GeometryMap.cpp" />
     <ClCompile Include="GeometryGenerator.cpp" />
-    <ClCompile Include="RenderPass.cpp" />
     <ClCompile Include="CommandObject.cpp" />
     <ClCompile Include="GL.cpp" />
     <ClCompile Include="PSOMap.cpp" />
     <ClCompile Include="RenderLayers.cpp" />
     <ClCompile Include="ShaderMap.cpp" />
     <ClCompile Include="World.cpp" />
+    <ClCompile Include="FrameManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="src">

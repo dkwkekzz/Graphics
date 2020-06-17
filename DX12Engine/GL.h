@@ -1,5 +1,6 @@
 #pragma once
 #include "d3dx12.h"
+#include "TypeDefine.h"
 #include "GlobalVar.h"
 #include "DescriptorHeap.h"
 
@@ -11,12 +12,18 @@
 class GL
 {
 public:
-	inline ID3D12Resource* CurrentBackBuffer()const { return mSwapChainBuffer[mCurrBackBuffer].Get(); }
-	inline ID3D12Device* GetDevice()const { return md3dDevice.Get(); }
+	inline TDevice* GetDevice()const { return md3dDevice.Get(); }
+	inline TResource* CurrentBackBuffer()const { return mSwapChainBuffer[mCurrBackBuffer].Get(); }
+	inline D3D_DRIVER_TYPE GetDeviceType()const { return md3dDriverType; }
+	inline DXGI_FORMAT GetBackBufferFormat()const { return mBackBufferFormat; }
+	inline DXGI_FORMAT GetDepthStencilFormat()const { return mDepthStencilFormat; }
+	inline bool Get4xMsaaState()const { return m4xMsaaState; }
+	inline UINT Get4xMsaaQuality()const { return m4xMsaaQuality; }
+
 	inline ID3D12GraphicsCommandList* GetCommandList()const { return mCommandList.Get(); }
 	inline D3D12_VIEWPORT GetViewport()const { return mScreenViewport; }
 
-	void Init();
+	void Init(HWND mainWnd);
 	void Resize(const DescriptorHeap&, int, int);
 	void FlushCommandQueue();
 
@@ -32,6 +39,8 @@ private:
 	void LogOutputDisplayModes(IDXGIOutput* output, DXGI_FORMAT format);
 
 private:
+	HWND mMainWnd;
+
 	Microsoft::WRL::ComPtr<IDXGIFactory4> mdxgiFactory;
 	Microsoft::WRL::ComPtr<IDXGISwapChain> mSwapChain;
 	Microsoft::WRL::ComPtr<ID3D12Device> md3dDevice;
@@ -57,5 +66,9 @@ private:
 	// Set true to use 4X MSAA (?.1.8).  The default is false.
 	bool		m4xMsaaState = false;    // 4X MSAA enabled
 	UINT		m4xMsaaQuality = 0;      // quality level of 4X MSAA
+
+	int				mClientWidth = Global::SCREEN_WIDTH;
+	int				mClientHeight = Global::SCREEN_HEIGHT;
+
 };
 
