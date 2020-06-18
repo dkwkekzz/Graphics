@@ -1,13 +1,12 @@
 #pragma once
 
 #include "d3dUtil.h"
-#include "GL.h"
 
 template<typename T>
 class UploadBuffer
 {
 public:
-    UploadBuffer(GL* gl, UINT elementCount, bool isConstantBuffer) : 
+    UploadBuffer(ID3D12Device* device, UINT elementCount, bool isConstantBuffer) :
         mIsConstantBuffer(isConstantBuffer)
     {
         mElementByteSize = sizeof(T);
@@ -22,7 +21,7 @@ public:
         if(isConstantBuffer)
             mElementByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(T));
 
-        ThrowIfFailed(gl->GetDevice()->CreateCommittedResource(
+        ThrowIfFailed(device->CreateCommittedResource(
             &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
             D3D12_HEAP_FLAG_NONE,
             &CD3DX12_RESOURCE_DESC::Buffer(mElementByteSize*elementCount),
@@ -46,7 +45,7 @@ public:
         mMappedData = nullptr;
     }
 
-	TResource* Resource()const
+    ID3D12Resource* Resource()const
     {
         return mUploadBuffer.Get();
     }

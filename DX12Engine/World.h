@@ -1,37 +1,26 @@
 #pragma once
 #include "GameTimer.h"
-#include "GL.h"
 #include "Camera.h"
-#include "DescriptorHeap.h"
-#include "TextureMap.h"
-#include "MaterialMap.h"
-#include "GeometryMap.h"
-#include "ShaderMap.h"
-#include "PSOMap.h"
-#include "CommandObject.h"
-#include "RenderLayers.h"
-#include "FrameManager.h"
+#include "SLO.h"
 
 #define getter(cls)												\
     private: std::unique_ptr<cls> m##cls;					    \
     public: inline cls* Get##cls() const { m##cls.get(); }		\
 
-class World
+struct World
 {
-    getter(GameTimer)
-    getter(GL)
-    getter(Camera)
-    getter(DescriptorHeap)
-    getter(TextureMap)
-    getter(MaterialMap)
-    getter(GeometryMap)
-    getter(ShaderMap)
-    getter(PSOMap)
-    getter(CommandObject)
-    getter(RenderLayers)
-    getter(FrameManager)
-
-public:
-	World();
-
+    GameTimer GameTimer; 
+    Camera Camera;
+    SLO::CommandObject CommandObject;
+    SLO::DescriptorHeap DescriptorHeap;
+    SLO::ResourceManager ResourceManager;
+    SLO::GeometryManager GeometryManager;
+    SLO::GL GL;
+    SLO::MaterialManager MaterialManager;
+    SLO::Mouse Mouse;
+    SLO::PSOManager PSOManager;
+    SLO::RenderItemManager RenderItemManager;
+    SLO::RootSignature RootSignature;
+    SLO::ShaderManager ShaderManager;
+    SLO::TextureManager TextureManager;
 };

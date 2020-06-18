@@ -44,5 +44,6 @@
 #include <sstream>
 #include <cassert>
 #include <cmath>
+#include <queue>
 
 #endif //PCH_H
