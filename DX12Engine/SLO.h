@@ -37,14 +37,14 @@ namespace SLO
 
 		D3D12_VIEWPORT screenViewport;
 		D3D12_RECT scissorRect;
-		int clientWidth = Global::SCREEN_WIDTH;
-		int clientHeight = Global::SCREEN_HEIGHT;
 
 		//UINT rtvDescriptorSize = 0;
 		//UINT dsvDescriptorSize = 0;
 		//UINT cbvSrvUavDescriptorSize = 0;
 
 		HWND mainWnd;
+		int clientWidth;
+		int clientHeight;
 
 		//Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap;
 		//Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap;
@@ -104,11 +104,6 @@ namespace SLO
 	{
 		std::queue<std::pair<std::string, std::wstring> > waitqueue;
 		std::unordered_map<std::string, std::unique_ptr<Texture>> textures;
-
-		inline void Add(const std::string& name, const std::wstring& filename)
-		{
-			waitqueue.push(std::make_pair(name, filename));
-		}
 	};
 
 	struct ShaderManager
@@ -195,6 +190,7 @@ namespace SLO
 
 	struct GeometryManager
 	{
+		std::queue<std::pair<std::string, std::wstring> > waitqueue;
 		std::unordered_map<std::string, std::unique_ptr<MeshGeometry>> geometries;
 	};
 
@@ -288,7 +284,8 @@ namespace SLO
 
 	enum class RenderLayer : int
 	{
-		Opaque = 0,
+		None = 0,
+		Opaque,
 		Mirrors,
 		Reflected,
 		Transparent,
@@ -376,7 +373,6 @@ namespace SLO
 	struct PSOManager
 	{
 		std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout;
-		//std::unordered_map<std::string, Microsoft::WRL::ComPtr<ID3D12PipelineState>> PSOs;
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOs[(int)RenderLayer::Count];
 	};
 

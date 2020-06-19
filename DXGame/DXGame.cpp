@@ -3,10 +3,14 @@
 
 #include "framework.h"
 #include "DXGame.h"
-#include "../DX12Engine/DX12Engine.h"
+#include "Engine.h"
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
     PSTR cmdLine, int showCmd)
 {
-    return DX12Engine::Run(hInstance);
+    Engine engine(hInstance);
+    if (!engine.Init())
+        return 0;
+
+    engine.Run();
 }

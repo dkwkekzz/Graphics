@@ -4,11 +4,13 @@
 #include "GlobalVar.h"
 #include "d3dx12.h"
 #include "d3dUtil.h"
+#include "SLP2G.h"
 #include "Pures.h"
+#include "string_utils.h"
 
 namespace SLP
 {
-#define ROOTCALL __forceinline static void
+#define ROOTCALL static void
 
 	using namespace Microsoft::WRL;
 	using namespace DirectX;
@@ -17,8 +19,77 @@ namespace SLP
 	static const UINT passCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(SLO::PassConstants));
 	static const UINT matCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(SLO::MaterialConstants));
 
+	struct GCommander
+	{
+		ROOTCALL ResetDirectly(SLO::CommandObject* pCommandObject)
+		{
+			// Reset the command list to prep for initialization commands.
+			ThrowIfFailed(pCommandObject->commandList->Reset(pCommandObject->directCmdListAlloc.Get(), nullptr));
+		}
+
+		ROOTCALL ResetByCurrFrame(SLO::CommandObject* pCommandObject, SLO::ResourceManager* pResourceManager)
+		{
+			auto* currFrame = pResourceManager->currFrameResource;
+
+			// Reuse the memory associated with command recording.
+			// We can only reset when the associated command lists have finished execution on the GPU.
+			ThrowIfFailed(currFrame->CmdListAlloc->Reset());
+
+			// A command list can be reset after it has been added to the command queue via ExecuteCommandList.
+			// Reusing the command list reuses memory.
+			ThrowIfFailed(pCommandObject->commandList->Reset(currFrame->CmdListAlloc.Get(), nullptr));
+		}
+
+		ROOTCALL Signal(SLO::CommandObject* pCommandObject)
+		{
+			// Advance the fence value to mark commands up to this fence point.
+			pCommandObject->currentFence++;
+
+			// Notify the fence when the GPU completes commands up to this fence point.
+			pCommandObject->commandQueue->Signal(pCommandObject->fence.Get(), pCommandObject->currentFence);
+		}
+
+		ROOTCALL Wait(SLO::CommandObject* pCommandObject)
+		{
+			// Wait until the GPU has completed commands up to this fence point.
+			if (pCommandObject->fence->GetCompletedValue() < pCommandObject->currentFence)
+			{
+				HANDLE eventHandle = CreateEventEx(nullptr, nullptr, FALSE, EVENT_ALL_ACCESS);
+
+				// Fire event when GPU hits current fence.  
+				ThrowIfFailed(pCommandObject->fence->SetEventOnCompletion(pCommandObject->currentFence, eventHandle));
+
+				// Wait until the GPU hits current fence event is fired.
+				WaitForSingleObject(eventHandle, INFINITE);
+				CloseHandle(eventHandle);
+			}
+		}
+
+		// Execute the resize commands.
+		ROOTCALL Execute(SLO::CommandObject* pCommandObject)
+		{
+			ThrowIfFailed(pCommandObject->commandList->Close());
+			ID3D12CommandList* cmdsLists[] = { pCommandObject->commandList.Get() };
+			pCommandObject->commandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+		}
+
+		// Wait until complete.
+		ROOTCALL Flush(SLO::CommandObject* pCommandObject)
+		{
+			Signal(pCommandObject);
+			Wait(pCommandObject);
+		}
+	};
+
 	struct GConstruct
 	{
+		ROOTCALL CreateHandle(SLO::GL* pGL, HWND mainWnd, int width, int height)
+		{
+			pGL->mainWnd = mainWnd;
+			pGL->clientWidth = width;
+			pGL->clientHeight = height;
+		}
+
 		ROOTCALL CreateDevice(SLO::GL* pGL, SLO::CommandObject* pCommandObject)
 		{
 #if defined(DEBUG) || defined(_DEBUG) 
@@ -166,6 +237,40 @@ namespace SLP
 			ThrowIfFailed(device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&pDescriptorHeap->srvHeap)));
 		}
 
+		ROOTCALL CreateRenderItem(SLO::Material* pMaterial, SLO::MeshGeometry* pMeshGeometry,
+			SLO::RenderItemManager* pRenderItemManager, SLO::RenderLayer layer, int submesh)
+		{
+			using RenderItem = SLO::RenderItem;
+
+			auto ritem = std::make_unique<RenderItem>();
+			ritem->World = MathHelper::Identity4x4();
+			ritem->TexTransform = MathHelper::Identity4x4();
+			ritem->ObjCBIndex = pRenderItemManager->itemCount++;
+			ritem->Mat = pMaterial;
+			ritem->Geo = pMeshGeometry;
+			ritem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+			ritem->IndexCount = ritem->Geo->Submeshes[submesh].IndexCount;
+			ritem->StartIndexLocation = ritem->Geo->Submeshes[submesh].StartIndexLocation;
+			ritem->BaseVertexLocation = ritem->Geo->Submeshes[submesh].BaseVertexLocation;
+			pRenderItemManager->ritemLayer[(int)layer].items.push_back(ritem.get());
+			pRenderItemManager->allritems.emplace_back(std::move(ritem));
+		}
+
+		ROOTCALL CreateTexture(SLO::TextureManager* pTextureManager, LPCSTR name, LPCWSTR filename)
+		{
+			pTextureManager->waitqueue.push(std::make_pair(name, filename));
+		}
+
+		ROOTCALL CreateModel(SLO::GeometryManager* pGeometryManager, LPCSTR name, LPCWSTR filename)
+		{
+			pGeometryManager->waitqueue.push(std::make_pair(name, filename));
+		}
+
+		ROOTCALL CreateShader(SLO::ShaderManager* pShaderManager, LPCSTR name, LPCWSTR filename)
+		{
+			// TODO: with D3D_SHADER_MACRO
+		}
+
 		ROOTCALL BuildRootSignature(SLO::GL* pGL, SLO::RootSignature* pRootSignature)
 		{
 			CD3DX12_DESCRIPTOR_RANGE texTable;
@@ -206,119 +311,6 @@ namespace SLP
 				IID_PPV_ARGS(pRootSignature->rootSignature.GetAddressOf())));
 		}
 
-		ROOTCALL LoadTextures(SLO::TextureManager* pTextureManager, SLO::GL* pGL, SLO::CommandObject* pCommandObject,
-			SLO::DescriptorHeap* pDescriptorHeap)
-		{
-			using Texture = SLO::Texture;
-
-			auto& queue = pTextureManager->waitqueue;
-			if (queue.empty())
-				return;
-
-			auto& map = pTextureManager->textures;
-			auto& device = pGL->d3dDevice;
-			auto& cmdList = pCommandObject->commandList;
-			while (!queue.empty())
-			{
-				auto item = queue.front();
-				queue.pop();
-
-				auto tex = std::make_unique<Texture>();
-				tex->name = item.first;
-				tex->filename = item.second;
-				ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(device.Get(), cmdList.Get(),
-					tex->filename.c_str(), tex->resource, tex->uploadHeap));
-
-				auto res = tex->resource;
-				tex->srvOffset = pDescriptorHeap->srvCount++;
-
-				D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-				srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-				srvDesc.Format = res->GetDesc().Format;
-				srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-				srvDesc.Texture2D.MostDetailedMip = 0;
-				srvDesc.Texture2D.MipLevels = -1;
-
-				CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor = SrvHeapHandle(pDescriptorHeap);
-				hDescriptor.Offset(tex->srvOffset, pDescriptorHeap->cbvSrvUavDescriptorSize);
-
-				device->CreateShaderResourceView(res.Get(), &srvDesc, hDescriptor);
-
-				map[tex->name] = std::move(tex);
-			}
-		}
-
-		// TODO: 런타임 추가
-		ROOTCALL BuildMaterials(SLO::TextureManager* pTextureManager, SLO::MaterialManager* pMaterialManager)
-		{
-			using Material = SLO::Material;
-
-			auto bricks = std::make_unique<Material>();
-			bricks->Name = "bricks";
-			bricks->MatCBIndex = 0;
-			bricks->DiffuseTex = pTextureManager->textures["bricks"].get();
-			bricks->DiffuseAlbedo = DirectX::XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-			bricks->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
-			bricks->Roughness = 0.25f;
-
-			auto checkertile = std::make_unique<Material>();
-			checkertile->Name = "checkertile";
-			checkertile->MatCBIndex = 1;
-			checkertile->DiffuseTex = pTextureManager->textures["checkboardTex"].get();
-			checkertile->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-			checkertile->FresnelR0 = XMFLOAT3(0.07f, 0.07f, 0.07f);
-			checkertile->Roughness = 0.3f;
-
-			auto icemirror = std::make_unique<Material>();
-			icemirror->Name = "icemirror";
-			icemirror->MatCBIndex = 2;
-			icemirror->DiffuseTex = pTextureManager->textures["iceTex"].get();
-			icemirror->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 0.3f);
-			icemirror->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
-			icemirror->Roughness = 0.5f;
-
-			auto skullMat = std::make_unique<Material>();
-			skullMat->Name = "skullMat";
-			skullMat->MatCBIndex = 3;
-			skullMat->DiffuseTex = pTextureManager->textures["white1x1Tex"].get();
-			skullMat->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-			skullMat->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
-			skullMat->Roughness = 0.3f;
-
-			auto shadowMat = std::make_unique<Material>();
-			shadowMat->Name = "shadowMat";
-			shadowMat->MatCBIndex = 4;
-			shadowMat->DiffuseTex = pTextureManager->textures["white1x1Tex"].get();
-			shadowMat->DiffuseAlbedo = XMFLOAT4(0.0f, 0.0f, 0.0f, 0.5f);
-			shadowMat->FresnelR0 = XMFLOAT3(0.001f, 0.001f, 0.001f);
-			shadowMat->Roughness = 0.0f;
-
-			pMaterialManager->materials["bricks"] = std::move(bricks);
-			pMaterialManager->materials["checkertile"] = std::move(checkertile);
-			pMaterialManager->materials["icemirror"] = std::move(icemirror);
-			pMaterialManager->materials["skullMat"] = std::move(skullMat);
-			pMaterialManager->materials["shadowMat"] = std::move(shadowMat);
-		}
-
-		static void AddRenderItem(SLO::Material* pMaterial, SLO::MeshGeometry* pMeshGeometry,
-			SLO::RenderItemManager* pRenderItemManager, SLO::RenderLayer layer, int submesh)
-		{
-			using RenderItem = SLO::RenderItem;
-
-			auto ritem = std::make_unique<RenderItem>();
-			ritem->World = MathHelper::Identity4x4();
-			ritem->TexTransform = MathHelper::Identity4x4();
-			ritem->ObjCBIndex = pRenderItemManager->itemCount++;
-			ritem->Mat = pMaterial;
-			ritem->Geo = pMeshGeometry;
-			ritem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-			ritem->IndexCount = ritem->Geo->Submeshes[submesh].IndexCount;
-			ritem->StartIndexLocation = ritem->Geo->Submeshes[submesh].StartIndexLocation;
-			ritem->BaseVertexLocation = ritem->Geo->Submeshes[submesh].BaseVertexLocation;
-			pRenderItemManager->ritemLayer[(int)layer].items.push_back(ritem.get());
-			pRenderItemManager->allritems.emplace_back(ritem);
-		}
-
 		ROOTCALL BuildFrameResources(SLO::GL* pGL, SLO::ResourceManager* pResourceManager)
 		{
 			auto* device = pGL->d3dDevice.Get();
@@ -335,7 +327,7 @@ namespace SLP
 				frame->MaterialCB = std::make_unique<UploadBuffer<SLO::MaterialConstants>>(device, Global::MAX_MATERIAL_COUNT, true);
 				frame->ObjectCB = std::make_unique<UploadBuffer<SLO::ObjectConstants>>(device, Global::MAX_OBJECT_COUNT, true);
 
-				pResourceManager->frameResources.emplace_back(frame);
+				pResourceManager->frameResources.emplace_back(std::move(frame));
 			}
 		}
 
@@ -491,127 +483,77 @@ namespace SLP
 			ThrowIfFailed(pGL->d3dDevice->CreateGraphicsPipelineState(&shadowPsoDesc, IID_PPV_ARGS(&pPSOManager->PSOs[(int)SLO::RenderLayer::Shadow])));
 		}
 
-		ROOTCALL InitializeAdvanced(SLO::GL* pGL, SLO::CommandObject* pCommandObject,
-			SLO::DescriptorHeap* pDescriptorHeap,
-			SLO::RootSignature* pRootSignature,
-			SLO::TextureManager* pTextureManager,
-			SLO::ShaderManager* pShaderManager,
-			SLO::GeometryManager* pGeometryManager,
-			SLO::MaterialManager* pMaterialManager,
-			SLO::RenderItemManager* pRenderItemManager,
-			SLO::ResourceManager* pResourceManager,
-			SLO::PSOManager* pPSOManager,
-			Camera* pCamera)
+		ROOTCALL InitializeUtils(Camera* pCamera)
 		{
-			// Reset the command list to prep for initialization commands.
-			auto* allocator = pCommandObject->directCmdListAlloc.Get();
-			ThrowIfFailed(pCommandObject->commandList->Reset(allocator, nullptr));
-
-			pTextureManager->Add("bricksTex", L"Textures/bricks3.dds");
-			pTextureManager->Add("checkboardTex", L"Textures/checkboard.dds");
-			pTextureManager->Add("iceTex", L"Textures/ice.dds");
-			pTextureManager->Add("white1x1Tex", L"Textures/white1x1.dds");
-			LoadTextures(pTextureManager, pGL, pCommandObject, pDescriptorHeap);
-
-			BuildRootSignature(pGL, pRootSignature);
-			//BuildDescriptorHeaps();
-
-			//BuildShadersAndInputLayout();
-			const D3D_SHADER_MACRO defines[] =
-			{
-				"FOG", "1",
-				NULL, NULL
-			};
-
-			const D3D_SHADER_MACRO alphaTestDefines[] =
-			{
-				"FOG", "1",
-				"ALPHA_TEST", "1",
-				NULL, NULL
-			};
-
-			pShaderManager->shaders.emplace("standardVS", d3dUtil::CompileShader(L"Shaders\\Default.hlsl", nullptr, "VS", "vs_5_0"));
-			pShaderManager->shaders.emplace("opaquePS", d3dUtil::CompileShader(L"Shaders\\Default.hlsl", defines, "PS", "vs_5_0"));
-			pShaderManager->shaders.emplace("alphaTestedPS", d3dUtil::CompileShader(L"Shaders\\Default.hlsl", alphaTestDefines, "PS", "vs_5_0"));
-
-			GGeometry::BuildRoomGeometry(pGL, pCommandObject, pGeometryManager);
-			GGeometry::BuildTxtGeometry(pGL, pCommandObject, pGeometryManager, L"Models/skull.txt");
-			BuildMaterials(pTextureManager, pMaterialManager);
-
-			//BuildRenderItems();
-			auto* matbricks = pMaterialManager->materials["bricks"].get();
-			auto* matcheckertile = pMaterialManager->materials["checkertile"].get();
-			auto* maticemirror = pMaterialManager->materials["icemirror"].get();
-			auto* matskullMat = pMaterialManager->materials["skullMat"].get();
-			auto* matshadowMat = pMaterialManager->materials["shadowMat"].get();
-			auto* roomGeo = pGeometryManager->geometries["roomGeo"].get();
-			auto* skullGeo = pGeometryManager->geometries["skullGeo"].get();
-			AddRenderItem(matcheckertile, roomGeo, pRenderItemManager, SLO::RenderLayer::Opaque, 0);
-			AddRenderItem(matbricks, roomGeo, pRenderItemManager, SLO::RenderLayer::Opaque, 1);
-			AddRenderItem(matskullMat, skullGeo, pRenderItemManager, SLO::RenderLayer::Opaque, 0);
-			AddRenderItem(matskullMat, skullGeo, pRenderItemManager, SLO::RenderLayer::Reflected, 0);
-			AddRenderItem(matshadowMat, skullGeo, pRenderItemManager, SLO::RenderLayer::Shadow, 0);
-			AddRenderItem(maticemirror, roomGeo, pRenderItemManager, SLO::RenderLayer::Mirrors, 2);
-			AddRenderItem(maticemirror, roomGeo, pRenderItemManager, SLO::RenderLayer::Transparent, 2);
-
-			BuildFrameResources(pGL, pResourceManager);
-			BuildPSOs(pGL, pPSOManager, pRootSignature, pShaderManager);
-
 			pCamera->SetPosition(0.0f, 2.0f, -15.0f);
-		}
-	};
-
-	struct GCommander
-	{
-		ROOTCALL ResetDirectly(SLO::CommandObject* pCommandObject)
-		{
-			// Reset the command list to prep for initialization commands.
-			ThrowIfFailed(pCommandObject->commandList->Reset(pCommandObject->directCmdListAlloc.Get(), nullptr));
-		}
-
-		ROOTCALL Signal(SLO::CommandObject* pCommandObject)
-		{
-			// Advance the fence value to mark commands up to this fence point.
-			pCommandObject->currentFence++;
-
-			// Notify the fence when the GPU completes commands up to this fence point.
-			pCommandObject->commandQueue->Signal(pCommandObject->fence.Get(), pCommandObject->currentFence);
-		}
-
-		ROOTCALL Wait(SLO::CommandObject* pCommandObject)
-		{
-			// Wait until the GPU has completed commands up to this fence point.
-			if (pCommandObject->fence->GetCompletedValue() < pCommandObject->currentFence)
-			{
-				HANDLE eventHandle = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
-
-				// Fire event when GPU hits current fence.  
-				ThrowIfFailed(pCommandObject->fence->SetEventOnCompletion(pCommandObject->currentFence, eventHandle));
-
-				// Wait until the GPU hits current fence event is fired.
-				WaitForSingleObject(eventHandle, INFINITE);
-				CloseHandle(eventHandle);
-			}
-		}
-
-		// Execute the resize commands.
-		ROOTCALL Execute(SLO::CommandObject* pCommandObject)
-		{
-			ThrowIfFailed(pCommandObject->commandList->Close());
-			ID3D12CommandList* cmdsLists[] = { pCommandObject->commandList.Get() };
-			pCommandObject->commandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
-		}
-
-		// Wait until complete.
-		ROOTCALL Flush(SLO::CommandObject* pCommandObject)
-		{
-			Signal(pCommandObject);
-			Wait(pCommandObject);
 		}
 	};
 
 	struct GUpdate
 	{
+		ROOTCALL UpdateGeometries(SLO::GL* pGL, SLO::CommandObject* pCommandObject, SLO::GeometryManager* pGeometryManager)
+		{
+			auto& queue = pGeometryManager->waitqueue;
+			if (queue.empty())
+				return;
+
+			while (!queue.empty())
+			{
+				auto item = queue.front();
+				queue.pop();
+
+				switch (HashCode(item.first.c_str()))
+				{
+				case HashCode("roomGeo"):
+					SLP2G::GGeometry::BuildRoomGeometry(pGL, pCommandObject, pGeometryManager);
+					break;
+				default:
+					SLP2G::GGeometry::BuildTxtGeometry(pGL, pCommandObject, pGeometryManager, item.first, item.second);
+				}
+			}
+		}
+
+		ROOTCALL UpdateTextures(SLO::TextureManager* pTextureManager, SLO::GL* pGL, SLO::CommandObject* pCommandObject, SLO::DescriptorHeap* pDescriptorHeap)
+		{
+			using Texture = SLO::Texture;
+
+			auto& queue = pTextureManager->waitqueue;
+			if (queue.empty())
+				return;
+
+			auto& map = pTextureManager->textures;
+			auto& device = pGL->d3dDevice;
+			auto& cmdList = pCommandObject->commandList;
+			while (!queue.empty())
+			{
+				auto item = queue.front();
+				queue.pop();
+
+				auto tex = std::make_unique<Texture>();
+				tex->name = item.first;
+				tex->filename = item.second;
+				ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(device.Get(), cmdList.Get(),
+					tex->filename.c_str(), tex->resource, tex->uploadHeap));
+
+				auto res = tex->resource;
+				tex->srvOffset = pDescriptorHeap->srvCount++;
+
+				D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+				srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+				srvDesc.Format = res->GetDesc().Format;
+				srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+				srvDesc.Texture2D.MostDetailedMip = 0;
+				srvDesc.Texture2D.MipLevels = -1;
+
+				CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor = SrvHeapHandle(pDescriptorHeap);
+				hDescriptor.Offset(tex->srvOffset, pDescriptorHeap->cbvSrvUavDescriptorSize);
+
+				device->CreateShaderResourceView(res.Get(), &srvDesc, hDescriptor);
+
+				map[tex->name] = std::move(tex);
+			}
+		}
+
 		ROOTCALL UpdateTimer(GameTimer* pGameTimer)
 		{
 			pGameTimer->Tick();
@@ -627,7 +569,7 @@ namespace SLP
 			// If not, wait until the GPU has completed commands up to this fence point.
 			if (pResourceManager->currFrameResource->Fence != 0 && pCommandObject->fence->GetCompletedValue() < pResourceManager->currFrameResource->Fence)
 			{
-				HANDLE eventHandle = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
+				HANDLE eventHandle = CreateEventEx(nullptr, nullptr, FALSE, EVENT_ALL_ACCESS);
 				ThrowIfFailed(pCommandObject->fence->SetEventOnCompletion(pResourceManager->currFrameResource->Fence, eventHandle));
 				WaitForSingleObject(eventHandle, INFINITE);
 				CloseHandle(eventHandle);
@@ -810,22 +752,17 @@ namespace SLP
 
 	struct GRender
 	{
-		ROOTCALL Resize(SLO::GL* pGL, SLO::CommandObject* pCommandObject, SLO::DescriptorHeap* pDescriptorHeap, Camera* pCamera)
+		ROOTCALL SetWindow(SLO::GL* pGL, int width, int height)
 		{
-			assert(pGL->d3dDevice);
-			assert(pGL->swapChain);
-			assert(pCommandObject->directCmdListAlloc);
+			pGL->clientWidth = width;
+			pGL->clientHeight = height;
+		}
 
-			// Flush before changing any resources.
-			GCommander::Flush(pCommandObject);
-
-			auto* allocator = pCommandObject->directCmdListAlloc.Get();
-			ThrowIfFailed(pCommandObject->commandList->Reset(allocator, nullptr));
-
+		ROOTCALL ResetChainBuffer(SLO::GL* pGL, SLO::DescriptorHeap* pDescriptorHeap)
+		{
 			// Release the previous resources we will be recreating.
 			for (int i = 0; i < Global::SWAP_CHAIN_BUFFER_COUNT; ++i)
 				pGL->swapChainBuffer[i].Reset();
-			pGL->depthStencilBuffer.Reset();
 
 			// Resize the swap chain.
 			ThrowIfFailed(pGL->swapChain->ResizeBuffers(
@@ -843,6 +780,11 @@ namespace SLP
 				pGL->d3dDevice->CreateRenderTargetView(pGL->swapChainBuffer[i].Get(), nullptr, rtvHeapHandle);
 				rtvHeapHandle.Offset(1, pDescriptorHeap->rtvDescriptorSize);
 			}
+		}
+
+		ROOTCALL ResetDepthStencilView(SLO::GL* pGL, SLO::DescriptorHeap* pDescriptorHeap, SLO::CommandObject* pCommandObject)
+		{
+			pGL->depthStencilBuffer.Reset();
 
 			// Create the depth/stencil buffer and view.
 			D3D12_RESOURCE_DESC depthStencilDesc;
@@ -888,13 +830,10 @@ namespace SLP
 			// Transition the resource from its initial state to be used as a depth buffer.
 			pCommandObject->commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(pGL->depthStencilBuffer.Get(),
 				D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_DEPTH_WRITE));
+		}
 
-			// Execute the resize commands.
-			GCommander::Execute(pCommandObject);
-
-			// Wait until resize is complete.
-			GCommander::Flush(pCommandObject);
-
+		ROOTCALL ResetViewport(SLO::GL* pGL, Camera* pCamera)
+		{
 			// Update the viewport transform to cover the client area.
 			auto& viewport = pGL->screenViewport;
 			viewport.TopLeftX = 0;
@@ -909,129 +848,8 @@ namespace SLP
 			pCamera->SetOrtho(viewport.Width, viewport.Height, 1.0f, 1000.0f);
 		}
 
-		static void DrawRenderItems(SLO::FrameResource* pFrameResource, SLO::RenderBundle* pRenderBundle, 
-			SLO::CommandObject* pCommandObject,
-			SLO::DescriptorHeap* pDescriptorHeap)
+		ROOTCALL Begin(SLO::GL* pGL, SLO::CommandObject* pCommandObject)
 		{
-			auto objectCB = pFrameResource->ObjectCB->Resource();
-			auto matCB = pFrameResource->MaterialCB->Resource();
-
-			auto& cmdList = pCommandObject->commandList;
-
-			// For each render item...
-			for (size_t i = 0; i < pRenderBundle->items.size(); ++i)
-			{
-				auto ri = pRenderBundle->items[i];
-
-				cmdList->IASetVertexBuffers(0, 1, &ri->Geo->VertexBufferView());
-				cmdList->IASetIndexBuffer(&ri->Geo->IndexBufferView());
-				cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
-
-				CD3DX12_GPU_DESCRIPTOR_HANDLE tex(pDescriptorHeap->srvHeap->GetGPUDescriptorHandleForHeapStart());
-				tex.Offset(ri->Mat->DiffuseTex->srvOffset, pDescriptorHeap->cbvSrvUavDescriptorSize);
-
-				D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
-				D3D12_GPU_VIRTUAL_ADDRESS matCBAddress = matCB->GetGPUVirtualAddress() + ri->Mat->MatCBIndex * matCBByteSize;
-
-				cmdList->SetGraphicsRootDescriptorTable(0, tex);
-				cmdList->SetGraphicsRootConstantBufferView(Global::OBJECTCB_PARAMETER_INDEX, objCBAddress);
-				cmdList->SetGraphicsRootConstantBufferView(Global::MATCB_PARAMETER_INDEX, matCBAddress);
-
-				cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
-			}
-		}
-
-		ROOTCALL Draw(SLO::ResourceManager* pResourceManager, SLO::CommandObject* pCommandObject, 
-			SLO::PSOManager* pPSOManager,
-			SLO::GL* pGL,
-			SLO::DescriptorHeap* pDescriptorHeap,
-			SLO::RootSignature* pRootSignature,
-			SLO::RenderItemManager* pRenderItemManager)
-		{
-			auto& curFrame = pResourceManager->currFrameResource;
-			auto& cmdListAlloc = curFrame->CmdListAlloc;
-			auto& mCommandList = pCommandObject->commandList;
-			auto& mRitemLayer = pRenderItemManager->ritemLayer;
-
-			// Reuse the memory associated with command recording.
-			// We can only reset when the associated command lists have finished execution on the GPU.
-			ThrowIfFailed(cmdListAlloc->Reset());
-
-			// A command list can be reset after it has been added to the command queue via ExecuteCommandList.
-			// Reusing the command list reuses memory.
-			ThrowIfFailed(mCommandList->Reset(cmdListAlloc.Get(), pPSOManager->PSOs[(int)SLO::RenderLayer::Opaque].Get()));
-
-			mCommandList->RSSetViewports(1, &(pGL->screenViewport));
-			mCommandList->RSSetScissorRects(1, &(pGL->scissorRect));
-
-			// Indicate a state transition on the resource usage.
-			mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(pGL),
-				D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
-
-			auto currentBackBufferView = BackBufferView(pDescriptorHeap, pGL->currBackBuffer);
-			auto depthstencilView = DepthStencilView(pDescriptorHeap);
-
-			// Clear the back buffer and depth buffer.
-			mCommandList->ClearRenderTargetView(currentBackBufferView, (float*)&(pResourceManager->mainPassCB.FogColor), 0, nullptr);
-			mCommandList->ClearDepthStencilView(depthstencilView, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-
-			// Specify the buffers we are going to render to.
-			mCommandList->OMSetRenderTargets(1, &currentBackBufferView, true, &depthstencilView);
-
-			ID3D12DescriptorHeap* descriptorHeaps[] = { pDescriptorHeap->srvHeap.Get() };
-			mCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-
-			mCommandList->SetGraphicsRootSignature(pRootSignature->rootSignature.Get());
-
-
-			// Draw opaque items--floors, walls, skull.
-			auto passCB = curFrame->PassCB->Resource();
-			mCommandList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress());
-			mCommandList->SetPipelineState(pPSOManager->PSOs[(int)SLO::RenderLayer::Opaque].Get());
-			DrawRenderItems(curFrame, &mRitemLayer[(int)SLO::RenderLayer::Opaque], pCommandObject, pDescriptorHeap);
-
-			// Mark the visible mirror pixels in the stencil buffer with the value 1
-			mCommandList->OMSetStencilRef(1);
-			mCommandList->SetPipelineState(pPSOManager->PSOs[(int)SLO::RenderLayer::Mirrors].Get());
-			DrawRenderItems(curFrame, &mRitemLayer[(int)SLO::RenderLayer::Mirrors], pCommandObject, pDescriptorHeap);
-
-			// Draw the reflection into the mirror only (only for pixels where the stencil buffer is 1).
-			// Note that we must supply a different per-pass constant buffer--one with the lights reflected.
-			mCommandList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress() + 1 * passCBByteSize);
-			mCommandList->SetPipelineState(pPSOManager->PSOs[(int)SLO::RenderLayer::Reflected].Get());
-			DrawRenderItems(curFrame, &mRitemLayer[(int)SLO::RenderLayer::Reflected], pCommandObject, pDescriptorHeap);
-
-			// Restore main pass constants and stencil ref.
-			mCommandList->SetGraphicsRootConstantBufferView(2, passCB->GetGPUVirtualAddress());
-			mCommandList->OMSetStencilRef(0);
-
-			// Draw mirror with transparency so reflection blends through.
-			mCommandList->SetPipelineState(pPSOManager->PSOs[(int)SLO::RenderLayer::Transparent].Get());
-			DrawRenderItems(curFrame, &mRitemLayer[(int)SLO::RenderLayer::Transparent], pCommandObject, pDescriptorHeap);
-
-			// Draw shadows
-			mCommandList->SetPipelineState(pPSOManager->PSOs[(int)SLO::RenderLayer::Shadow].Get());
-			DrawRenderItems(curFrame, &mRitemLayer[(int)SLO::RenderLayer::Shadow], pCommandObject, pDescriptorHeap);
-
-			End(pGL, pCommandObject);
-
-			GCommander::Execute(pCommandObject);
-
-			SwapBuffer(pGL);
-
-			GCommander::Signal(pCommandObject);
-		}
-
-		ROOTCALL Begin(SLO::FrameResource* pFrameResource, SLO::GL* pGL, SLO::CommandObject* pCommandObject)
-		{
-			// Reuse the memory associated with command recording.
-			// We can only reset when the associated command lists have finished execution on the GPU.
-			ThrowIfFailed(pFrameResource->CmdListAlloc->Reset());
-
-			// A command list can be reset after it has been added to the command queue via ExecuteCommandList.
-			// Reusing the command list reuses memory.
-			ThrowIfFailed(pCommandObject->commandList->Reset(pFrameResource->CmdListAlloc.Get(), nullptr));
-
 			pCommandObject->commandList->RSSetViewports(1, &(pGL->screenViewport));
 			pCommandObject->commandList->RSSetScissorRects(1, &(pGL->scissorRect));
 
@@ -1065,9 +883,9 @@ namespace SLP
 			pCommandObject->commandList->SetGraphicsRootSignature(pRootSignature->rootSignature.Get());
 		}
 
-		ROOTCALL SetPassConstantsBuffer(SLO::FrameResource* pFrameResource, SLO::CommandObject* pCommandObject, int passIdx)
+		ROOTCALL SetPassConstantsBuffer(SLO::ResourceManager* pResourceManager, SLO::CommandObject* pCommandObject, int passIdx)
 		{
-			auto* passCB = pFrameResource->PassCB->Resource();
+			auto* passCB = pResourceManager->currFrameResource->PassCB->Resource();
 			pCommandObject->commandList->SetGraphicsRootConstantBufferView(Global::PASSCB_PARAMETER_INDEX, passCB->GetGPUVirtualAddress() + (passIdx - 1) * passCBByteSize);
 		}
 
@@ -1076,11 +894,38 @@ namespace SLP
 			pCommandObject->commandList->OMSetStencilRef(refVal);
 		}
 
-		ROOTCALL Render(SLO::CommandObject* pCommandObject, SLO::PSOManager* pPSOManager, SLO::FrameResource* pFrameResource,
+		ROOTCALL Draw(SLO::CommandObject* pCommandObject, SLO::PSOManager* pPSOManager, SLO::ResourceManager* pResourceManager,
 			SLO::RenderItemManager* pRenderItemManager, SLO::DescriptorHeap* pDescriptorHeap, SLO::RenderLayer layer)
 		{
-			pCommandObject->commandList->SetPipelineState(pPSOManager->PSOs[(int)layer].Get());
-			DrawRenderItems(pFrameResource, &pRenderItemManager->ritemLayer[(int)layer], pCommandObject, pDescriptorHeap);
+			auto& cmdList = pCommandObject->commandList;
+			cmdList->SetPipelineState(pPSOManager->PSOs[(int)layer].Get());
+
+			auto* objectCB = pResourceManager->currFrameResource->ObjectCB->Resource();
+			auto* matCB = pResourceManager->currFrameResource->MaterialCB->Resource();
+
+			auto& renderBundle = pRenderItemManager->ritemLayer[(int)layer];
+
+			// For each render item...
+			for (size_t i = 0; i < renderBundle.items.size(); ++i)
+			{
+				auto ri = renderBundle.items[i];
+
+				cmdList->IASetVertexBuffers(0, 1, &ri->Geo->VertexBufferView());
+				cmdList->IASetIndexBuffer(&ri->Geo->IndexBufferView());
+				cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
+
+				CD3DX12_GPU_DESCRIPTOR_HANDLE tex(pDescriptorHeap->srvHeap->GetGPUDescriptorHandleForHeapStart());
+				tex.Offset(ri->Mat->DiffuseTex->srvOffset, pDescriptorHeap->cbvSrvUavDescriptorSize);
+
+				D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
+				D3D12_GPU_VIRTUAL_ADDRESS matCBAddress = matCB->GetGPUVirtualAddress() + ri->Mat->MatCBIndex * matCBByteSize;
+
+				cmdList->SetGraphicsRootDescriptorTable(0, tex);
+				cmdList->SetGraphicsRootConstantBufferView(Global::OBJECTCB_PARAMETER_INDEX, objCBAddress);
+				cmdList->SetGraphicsRootConstantBufferView(Global::MATCB_PARAMETER_INDEX, matCBAddress);
+
+				cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
+			}
 		}
 
 		ROOTCALL End(SLO::GL* pGL, SLO::CommandObject* pCommandObject)
@@ -1090,7 +935,7 @@ namespace SLP
 				D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 		}
 
-		ROOTCALL SwapBuffer(SLO::GL* pGL)
+		ROOTCALL SwapChainBuffer(SLO::GL* pGL)
 		{
 			// Swap the back and front buffers
 			ThrowIfFailed(pGL->swapChain->Present(0, 0));
@@ -1098,204 +943,105 @@ namespace SLP
 		}
 	};
 
-	struct GGeometry
+	struct GForTest
 	{
-		using Vertex = SLO::Vertex;
-		using SubmeshGeometry = SLO::SubmeshGeometry;
-		using MeshGeometry = SLO::MeshGeometry;
-
-		static void BuildRoomGeometry(SLO::GL* pGL, SLO::CommandObject* pCommandObject, SLO::GeometryManager* pGeometryManager)
+		ROOTCALL BuildTextures(SLO::TextureManager* pTextureManager)
 		{
-			// Create and specify geometry.  For this sample we draw a floor
-			// and a wall with a mirror on it.  We put the floor, wall, and
-			// mirror geometry in one vertex buffer.
-			//
-			//   |--------------|
-			//   |              |
-			//   |----|----|----|
-			//   |Wall|Mirr|Wall|
-			//   |    | or |    |
-			//   /--------------/
-			//  /   Floor      /
-			// /--------------/
-
-			std::array<Vertex, 20> vertices =
-			{
-				// Floor: Observe we tile texture coordinates.
-				Vertex(-3.5f, 0.0f, -10.0f, 0.0f, 1.0f, 0.0f, 0.0f, 4.0f), // 0 
-				Vertex(-3.5f, 0.0f,   0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f),
-				Vertex(7.5f, 0.0f,   0.0f, 0.0f, 1.0f, 0.0f, 4.0f, 0.0f),
-				Vertex(7.5f, 0.0f, -10.0f, 0.0f, 1.0f, 0.0f, 4.0f, 4.0f),
-
-				// Wall: Observe we tile texture coordinates, and that we
-				// leave a gap in the middle for the mirror.
-				Vertex(-3.5f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 2.0f), // 4
-				Vertex(-3.5f, 4.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 0.0f),
-				Vertex(-2.5f, 4.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.5f, 0.0f),
-				Vertex(-2.5f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.5f, 2.0f),
-
-				Vertex(2.5f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 2.0f), // 8 
-				Vertex(2.5f, 4.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 0.0f),
-				Vertex(7.5f, 4.0f, 0.0f, 0.0f, 0.0f, -1.0f, 2.0f, 0.0f),
-				Vertex(7.5f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 2.0f, 2.0f),
-
-				Vertex(-3.5f, 4.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 1.0f), // 12
-				Vertex(-3.5f, 6.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 0.0f),
-				Vertex(7.5f, 6.0f, 0.0f, 0.0f, 0.0f, -1.0f, 6.0f, 0.0f),
-				Vertex(7.5f, 4.0f, 0.0f, 0.0f, 0.0f, -1.0f, 6.0f, 1.0f),
-
-				// Mirror
-				Vertex(-2.5f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 1.0f), // 16
-				Vertex(-2.5f, 4.0f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 0.0f),
-				Vertex(2.5f, 4.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 0.0f),
-				Vertex(2.5f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, 1.0f, 1.0f)
-			};
-
-			std::array<std::int16_t, 30> indices =
-			{
-				// Floor
-				0, 1, 2,
-				0, 2, 3,
-
-				// Walls
-				4, 5, 6,
-				4, 6, 7,
-
-				8, 9, 10,
-				8, 10, 11,
-
-				12, 13, 14,
-				12, 14, 15,
-
-				// Mirror
-				16, 17, 18,
-				16, 18, 19
-			};
-
-			SubmeshGeometry floorSubmesh;
-			floorSubmesh.IndexCount = 6;
-			floorSubmesh.StartIndexLocation = 0;
-			floorSubmesh.BaseVertexLocation = 0;
-
-			SubmeshGeometry wallSubmesh;
-			wallSubmesh.IndexCount = 18;
-			wallSubmesh.StartIndexLocation = 6;
-			wallSubmesh.BaseVertexLocation = 0;
-
-			SubmeshGeometry mirrorSubmesh;
-			mirrorSubmesh.IndexCount = 6;
-			mirrorSubmesh.StartIndexLocation = 24;
-			mirrorSubmesh.BaseVertexLocation = 0;
-
-			const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
-			const UINT ibByteSize = (UINT)indices.size() * sizeof(std::uint16_t);
-
-			auto geo = std::make_unique<MeshGeometry>();
-			geo->Name = "roomGeo";
-
-			ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
-			CopyMemory(geo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
-
-			ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
-			CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
-
-			geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(pGL->d3dDevice.Get(),
-				pCommandObject->commandList.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
-
-			geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(pGL->d3dDevice.Get(),
-				pCommandObject->commandList.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
-
-			geo->VertexByteStride = sizeof(Vertex);
-			geo->VertexBufferByteSize = vbByteSize;
-			geo->IndexFormat = DXGI_FORMAT_R16_UINT;
-			geo->IndexBufferByteSize = ibByteSize;
-
-			geo->Submeshes.emplace_back(floorSubmesh);
-			geo->Submeshes.emplace_back(wallSubmesh);
-			geo->Submeshes.emplace_back(mirrorSubmesh);
-
-			pGeometryManager->geometries[geo->Name] = std::move(geo);
+			SLP::GConstruct::CreateTexture(pTextureManager, "bricksTex", L"Textures/bricks3.dds");
+			SLP::GConstruct::CreateTexture(pTextureManager, "checkboardTex", L"Textures/checkboard.dds");
+			SLP::GConstruct::CreateTexture(pTextureManager, "iceTex", L"Textures/ice.dds");
+			SLP::GConstruct::CreateTexture(pTextureManager, "white1x1Tex", L"Textures/white1x1.dds");
 		}
 
-		static void BuildTxtGeometry(SLO::GL* pGL, SLO::CommandObject* pCommandObject, SLO::GeometryManager* pGeometryManager, const std::wstring& filename)
+		ROOTCALL BuildRenderItems(SLO::MaterialManager* pMaterialManager, SLO::GeometryManager* pGeometryManager, SLO::RenderItemManager* pRenderItemManager)
 		{
-			std::ifstream fin(filename);
+			auto* matbricks = pMaterialManager->materials["bricks"].get();
+			auto* matcheckertile = pMaterialManager->materials["checkertile"].get();
+			auto* maticemirror = pMaterialManager->materials["icemirror"].get();
+			auto* matskullMat = pMaterialManager->materials["skullMat"].get();
+			auto* matshadowMat = pMaterialManager->materials["shadowMat"].get();
+			auto* roomGeo = pGeometryManager->geometries["roomGeo"].get();
+			auto* skullGeo = pGeometryManager->geometries["skullGeo"].get();
+			SLP::GConstruct::CreateRenderItem(matcheckertile, roomGeo, pRenderItemManager, SLO::RenderLayer::Opaque, 0);
+			SLP::GConstruct::CreateRenderItem(matbricks, roomGeo, pRenderItemManager, SLO::RenderLayer::Opaque, 1);
+			SLP::GConstruct::CreateRenderItem(matskullMat, skullGeo, pRenderItemManager, SLO::RenderLayer::Opaque, 0);
+			SLP::GConstruct::CreateRenderItem(matskullMat, skullGeo, pRenderItemManager, SLO::RenderLayer::Reflected, 0);
+			SLP::GConstruct::CreateRenderItem(matshadowMat, skullGeo, pRenderItemManager, SLO::RenderLayer::Shadow, 0);
+			SLP::GConstruct::CreateRenderItem(maticemirror, roomGeo, pRenderItemManager, SLO::RenderLayer::Mirrors, 2);
+			SLP::GConstruct::CreateRenderItem(maticemirror, roomGeo, pRenderItemManager, SLO::RenderLayer::Transparent, 2);
+		}
 
-			if (!fin)
+		ROOTCALL BuildShaders(SLO::ShaderManager* pShaderManager)
+		{
+			const D3D_SHADER_MACRO defines[] =
 			{
-				wchar_t message[512];
-				swprintf_s(message, L"%s not found.", filename.c_str());
-				MessageBox(0, message, 0, 0);
-				return;
-			}
+				"FOG", "1",
+				NULL, NULL
+			};
 
-			UINT vcount = 0;
-			UINT tcount = 0;
-			std::string ignore;
-
-			fin >> ignore >> vcount;
-			fin >> ignore >> tcount;
-			fin >> ignore >> ignore >> ignore >> ignore;
-
-			std::vector<Vertex> vertices(vcount);
-			for (UINT i = 0; i < vcount; ++i)
+			const D3D_SHADER_MACRO alphaTestDefines[] =
 			{
-				fin >> vertices[i].Pos.x >> vertices[i].Pos.y >> vertices[i].Pos.z;
-				fin >> vertices[i].Normal.x >> vertices[i].Normal.y >> vertices[i].Normal.z;
+				"FOG", "1",
+				"ALPHA_TEST", "1",
+				NULL, NULL
+			};
 
-				// Model does not have texture coordinates, so just zero them out.
-				vertices[i].TexC = { 0.0f, 0.0f };
-			}
+			pShaderManager->shaders.emplace("standardVS", d3dUtil::CompileShader(L"Shaders\\Default.hlsl", nullptr, "VS", "vs_5_0"));
+			pShaderManager->shaders.emplace("opaquePS", d3dUtil::CompileShader(L"Shaders\\Default.hlsl", defines, "PS", "vs_5_0"));
+			pShaderManager->shaders.emplace("alphaTestedPS", d3dUtil::CompileShader(L"Shaders\\Default.hlsl", alphaTestDefines, "PS", "vs_5_0"));
+		}
 
-			fin >> ignore;
-			fin >> ignore;
-			fin >> ignore;
+		ROOTCALL BuildMaterials(SLO::TextureManager* pTextureManager, SLO::MaterialManager* pMaterialManager)
+		{
+			using Material = SLO::Material;
 
-			std::vector<std::int32_t> indices(3 * tcount);
-			for (UINT i = 0; i < tcount; ++i)
-			{
-				fin >> indices[i * 3 + 0] >> indices[i * 3 + 1] >> indices[i * 3 + 2];
-			}
+			auto bricks = std::make_unique<Material>();
+			bricks->Name = "bricks";
+			bricks->MatCBIndex = 0;
+			bricks->DiffuseTex = pTextureManager->textures["bricks"].get();
+			bricks->DiffuseAlbedo = DirectX::XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+			bricks->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
+			bricks->Roughness = 0.25f;
 
-			fin.close();
+			auto checkertile = std::make_unique<Material>();
+			checkertile->Name = "checkertile";
+			checkertile->MatCBIndex = 1;
+			checkertile->DiffuseTex = pTextureManager->textures["checkboardTex"].get();
+			checkertile->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+			checkertile->FresnelR0 = XMFLOAT3(0.07f, 0.07f, 0.07f);
+			checkertile->Roughness = 0.3f;
 
-			//
-			// Pack the indices of all the meshes into one index buffer.
-			//
+			auto icemirror = std::make_unique<Material>();
+			icemirror->Name = "icemirror";
+			icemirror->MatCBIndex = 2;
+			icemirror->DiffuseTex = pTextureManager->textures["iceTex"].get();
+			icemirror->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 0.3f);
+			icemirror->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
+			icemirror->Roughness = 0.5f;
 
-			const UINT vbByteSize = (UINT)vertices.size() * sizeof(Vertex);
+			auto skullMat = std::make_unique<Material>();
+			skullMat->Name = "skullMat";
+			skullMat->MatCBIndex = 3;
+			skullMat->DiffuseTex = pTextureManager->textures["white1x1Tex"].get();
+			skullMat->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+			skullMat->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
+			skullMat->Roughness = 0.3f;
 
-			const UINT ibByteSize = (UINT)indices.size() * sizeof(std::int32_t);
+			auto shadowMat = std::make_unique<Material>();
+			shadowMat->Name = "shadowMat";
+			shadowMat->MatCBIndex = 4;
+			shadowMat->DiffuseTex = pTextureManager->textures["white1x1Tex"].get();
+			shadowMat->DiffuseAlbedo = XMFLOAT4(0.0f, 0.0f, 0.0f, 0.5f);
+			shadowMat->FresnelR0 = XMFLOAT3(0.001f, 0.001f, 0.001f);
+			shadowMat->Roughness = 0.0f;
 
-			auto geo = std::make_unique<MeshGeometry>();
-			geo->Name = "skullGeo";
-
-			ThrowIfFailed(D3DCreateBlob(vbByteSize, &geo->VertexBufferCPU));
-			CopyMemory(geo->VertexBufferCPU->GetBufferPointer(), vertices.data(), vbByteSize);
-
-			ThrowIfFailed(D3DCreateBlob(ibByteSize, &geo->IndexBufferCPU));
-			CopyMemory(geo->IndexBufferCPU->GetBufferPointer(), indices.data(), ibByteSize);
-
-			geo->VertexBufferGPU = d3dUtil::CreateDefaultBuffer(pGL->d3dDevice.Get(),
-				pCommandObject->commandList.Get(), vertices.data(), vbByteSize, geo->VertexBufferUploader);
-
-			geo->IndexBufferGPU = d3dUtil::CreateDefaultBuffer(pGL->d3dDevice.Get(),
-				pCommandObject->commandList.Get(), indices.data(), ibByteSize, geo->IndexBufferUploader);
-
-			geo->VertexByteStride = sizeof(Vertex);
-			geo->VertexBufferByteSize = vbByteSize;
-			geo->IndexFormat = DXGI_FORMAT_R32_UINT;
-			geo->IndexBufferByteSize = ibByteSize;
-
-			SubmeshGeometry submesh;
-			submesh.IndexCount = (UINT)indices.size();
-			submesh.StartIndexLocation = 0;
-			submesh.BaseVertexLocation = 0;
-
-			geo->Submeshes.emplace_back(submesh);
-
-			pGeometryManager->geometries[geo->Name] = std::move(geo);
+			pMaterialManager->materials["bricks"] = std::move(bricks);
+			pMaterialManager->materials["checkertile"] = std::move(checkertile);
+			pMaterialManager->materials["icemirror"] = std::move(icemirror);
+			pMaterialManager->materials["skullMat"] = std::move(skullMat);
+			pMaterialManager->materials["shadowMat"] = std::move(shadowMat);
 		}
 
 	};
+
 }

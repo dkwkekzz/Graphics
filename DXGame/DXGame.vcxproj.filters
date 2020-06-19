@@ -5,14 +5,16 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="targetver.h" />
+    <ClInclude Include="Engine.h" />
+    <ClInclude Include="GameTimer.h" />
+    <ClInclude Include="config.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DXGame.cpp" />
+    <ClCompile Include="Engine.cpp" />
+    <ClCompile Include="GameTimer.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <Filter Include="Common">
-      <UniqueIdentifier>{8382f6e4-295b-4ac3-a4c6-4ade3bc9e953}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Shaders">
       <UniqueIdentifier>{036c96ed-257e-4441-92df-09a6d2b3029c}</UniqueIdentifier>
     </Filter>
