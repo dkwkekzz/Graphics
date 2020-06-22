@@ -18,7 +18,10 @@ public:
 	static void OnMouseUp(int btnState, int x, int y);
 	static void OnMouseMove(int btnState, int x, int y);
 
-	static void OnCreateTexture(LPCSTR name, LPCWSTR filename);
-	static void OnCreateModel(LPCSTR name, LPCWSTR filename);
-	static void OnCreateShader(LPCSTR name, LPCWSTR filename);
+	static void OnRestart();
+	static void OnPause();
+	static float GetTotalTime();
+
+	static void OnCreateActor(LPCSTR modelName, int& generatedId);
+	static void OnTransformActor(int id, float translate[3], float rotate[3], float scale[3]);
 };

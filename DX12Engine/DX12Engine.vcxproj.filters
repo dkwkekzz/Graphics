@@ -57,6 +57,8 @@
     <ClInclude Include="SLP2G.h" />
     <ClInclude Include="Pures.h" />
     <ClInclude Include="string_utils.h" />
+    <ClInclude Include="Waves.h" />
+    <ClInclude Include="BlurFilter.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />
@@ -95,6 +97,8 @@
     <ClCompile Include="MathHelper.cpp" />
     <ClCompile Include="Camera.cpp" />
     <ClCompile Include="GeometryGenerator.cpp" />
+    <ClCompile Include="Waves.cpp" />
+    <ClCompile Include="BlurFilter.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="src">

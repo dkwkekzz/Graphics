@@ -6,13 +6,12 @@
     <ClInclude Include="Resource.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="Engine.h" />
-    <ClInclude Include="GameTimer.h" />
     <ClInclude Include="config.h" />
+    <ClInclude Include="P1G.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DXGame.cpp" />
     <ClCompile Include="Engine.cpp" />
-    <ClCompile Include="GameTimer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shaders">
@@ -20,7 +19,16 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Shaders\color.hlsl">
+    <FxCompile Include="Shaders\Default.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\LightingUtil.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\TreeSprite.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\Blur.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

@@ -1,5 +1,4 @@
 #pragma once
-#include "GameTimer.h"
 #include "config.h"
 
 class Engine
@@ -42,6 +41,5 @@ private:
 	int				mClientHeight = Config::SCREEN_HEIGHT;
 	std::wstring	mMainWndCaption = Config::APPLICATION_NAME;
 
-	GameTimer	m_timer;
 };
 

@@ -32,6 +32,7 @@
 #include <stdint.h>
 #pragma warning(pop)
 #include <float.h>
+#include <ppl.h>
 
 #include <string>
 #include <memory>

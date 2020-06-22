@@ -10,11 +10,6 @@
 
 namespace SLP
 {
-#define ROOTCALL static void
-
-	using namespace Microsoft::WRL;
-	using namespace DirectX;
-
 	static const UINT objCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(SLO::ObjectConstants));
 	static const UINT passCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(SLO::PassConstants));
 	static const UINT matCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(SLO::MaterialConstants));
@@ -44,6 +39,15 @@ namespace SLP
 		{
 			// Advance the fence value to mark commands up to this fence point.
 			pCommandObject->currentFence++;
+
+			// Notify the fence when the GPU completes commands up to this fence point.
+			pCommandObject->commandQueue->Signal(pCommandObject->fence.Get(), pCommandObject->currentFence);
+		}
+
+		ROOTCALL SignalByCurrFrame(SLO::CommandObject* pCommandObject, SLO::ResourceManager* pResourceManager)
+		{
+			// Advance the fence value to mark commands up to this fence point.
+			pResourceManager->currFrameResource->Fence = ++pCommandObject->currentFence;
 
 			// Notify the fence when the GPU completes commands up to this fence point.
 			pCommandObject->commandQueue->Signal(pCommandObject->fence.Get(), pCommandObject->currentFence);
@@ -237,81 +241,115 @@ namespace SLP
 			ThrowIfFailed(device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&pDescriptorHeap->srvHeap)));
 		}
 
-		ROOTCALL CreateRenderItem(SLO::Material* pMaterial, SLO::MeshGeometry* pMeshGeometry,
-			SLO::RenderItemManager* pRenderItemManager, SLO::RenderLayer layer, int submesh)
+		ROOTCALL CreateBlur(BlurFilter* pBlurFilter, SLO::GL* pGL, SLO::DescriptorHeap* pDescriptorHeap)
 		{
-			using RenderItem = SLO::RenderItem;
+			pBlurFilter->OnInit(pGL->d3dDevice.Get(), pGL->clientWidth, pGL->clientHeight, DXGI_FORMAT_R8G8B8A8_UNORM);
 
-			auto ritem = std::make_unique<RenderItem>();
-			ritem->World = MathHelper::Identity4x4();
-			ritem->TexTransform = MathHelper::Identity4x4();
-			ritem->ObjCBIndex = pRenderItemManager->itemCount++;
-			ritem->Mat = pMaterial;
-			ritem->Geo = pMeshGeometry;
-			ritem->PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-			ritem->IndexCount = ritem->Geo->Submeshes[submesh].IndexCount;
-			ritem->StartIndexLocation = ritem->Geo->Submeshes[submesh].StartIndexLocation;
-			ritem->BaseVertexLocation = ritem->Geo->Submeshes[submesh].BaseVertexLocation;
-			pRenderItemManager->ritemLayer[(int)layer].items.push_back(ritem.get());
-			pRenderItemManager->allritems.emplace_back(std::move(ritem));
+			pBlurFilter->BuildDescriptors(
+				CD3DX12_CPU_DESCRIPTOR_HANDLE(pDescriptorHeap->srvHeap->GetCPUDescriptorHandleForHeapStart(),
+					pDescriptorHeap->srvCount, pDescriptorHeap->cbvSrvUavDescriptorSize),
+				CD3DX12_GPU_DESCRIPTOR_HANDLE(pDescriptorHeap->srvHeap->GetGPUDescriptorHandleForHeapStart(),
+					pDescriptorHeap->srvCount, pDescriptorHeap->cbvSrvUavDescriptorSize),
+				pDescriptorHeap->cbvSrvUavDescriptorSize, pDescriptorHeap->srvCount);
 		}
 
-		ROOTCALL CreateTexture(SLO::TextureManager* pTextureManager, LPCSTR name, LPCWSTR filename)
+		ROOTCALL CreateEtcs(GameTimer* pGameTimer, Camera* pCamera)
 		{
-			pTextureManager->waitqueue.push(std::make_pair(name, filename));
+			pGameTimer->Reset();
+			pCamera->SetPosition(0.0f, 2.0f, -15.0f);
 		}
+	};
 
-		ROOTCALL CreateModel(SLO::GeometryManager* pGeometryManager, LPCSTR name, LPCWSTR filename)
-		{
-			pGeometryManager->waitqueue.push(std::make_pair(name, filename));
-		}
-
-		ROOTCALL CreateShader(SLO::ShaderManager* pShaderManager, LPCSTR name, LPCWSTR filename)
-		{
-			// TODO: with D3D_SHADER_MACRO
-		}
-
+	struct GBuild
+	{
 		ROOTCALL BuildRootSignature(SLO::GL* pGL, SLO::RootSignature* pRootSignature)
 		{
-			CD3DX12_DESCRIPTOR_RANGE texTable;
-			texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
-
-			// Root parameter can be a table, root descriptor or root constants.
-			CD3DX12_ROOT_PARAMETER slotsRootParameter[4];
-
-			// Perfomance TIP: Order from most frequent to least frequent.
-			slotsRootParameter[0].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);
-			slotsRootParameter[1].InitAsConstantBufferView(0);
-			slotsRootParameter[2].InitAsConstantBufferView(1);
-			slotsRootParameter[3].InitAsConstantBufferView(2);
-
-			auto staticSamplers = GetStaticSamplers();
-
-			// A root signature is an array of root parameters.
-			CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(4, slotsRootParameter,
-				(UINT)staticSamplers.size(), staticSamplers.data(),
-				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-			// create a root signature with a single SLOst which points to a descriptor range consisting of a single constant buffer
-			ComPtr<ID3DBlob> serializedRootSig = nullptr;
-			ComPtr<ID3DBlob> errorBlob = nullptr;
-			HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
-				serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
-
-			if (errorBlob != nullptr)
+			//
+			// default
+			//
 			{
-				::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
-			}
-			ThrowIfFailed(hr);
+				CD3DX12_DESCRIPTOR_RANGE texTable;
+				texTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
 
-			ThrowIfFailed(pGL->d3dDevice->CreateRootSignature(
-				0,
-				serializedRootSig->GetBufferPointer(),
-				serializedRootSig->GetBufferSize(),
-				IID_PPV_ARGS(pRootSignature->rootSignature.GetAddressOf())));
+				// Root parameter can be a table, root descriptor or root constants.
+				CD3DX12_ROOT_PARAMETER slotsRootParameter[4];
+
+				// Perfomance TIP: Order from most frequent to least frequent.
+				slotsRootParameter[0].InitAsDescriptorTable(1, &texTable, D3D12_SHADER_VISIBILITY_PIXEL);
+				slotsRootParameter[1].InitAsConstantBufferView(0);
+				slotsRootParameter[2].InitAsConstantBufferView(1);
+				slotsRootParameter[3].InitAsConstantBufferView(2);
+
+				auto staticSamplers = GetStaticSamplers();
+
+				// A root signature is an array of root parameters.
+				CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(4, slotsRootParameter,
+					(UINT)staticSamplers.size(), staticSamplers.data(),
+					D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+				// create a root signature with a single SLOst which points to a descriptor range consisting of a single constant buffer
+				ComPtr<ID3DBlob> serializedRootSig = nullptr;
+				ComPtr<ID3DBlob> errorBlob = nullptr;
+				HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+					serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
+
+				if (errorBlob != nullptr)
+				{
+					::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+				}
+				ThrowIfFailed(hr);
+
+				ThrowIfFailed(pGL->d3dDevice->CreateRootSignature(
+					0,
+					serializedRootSig->GetBufferPointer(),
+					serializedRootSig->GetBufferSize(),
+					IID_PPV_ARGS(pRootSignature->rootSignature.GetAddressOf())));
+			}
+
+			//
+			// postprocess
+			//
+			{
+				CD3DX12_DESCRIPTOR_RANGE srvTable;
+				srvTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+			
+				CD3DX12_DESCRIPTOR_RANGE uavTable;
+				uavTable.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+			
+				// Root parameter can be a table, root descriptor or root constants.
+				CD3DX12_ROOT_PARAMETER slotRootParameter[3];
+			
+				// Perfomance TIP: Order from most frequent to least frequent.
+				slotRootParameter[0].InitAsConstants(12, 0);
+				slotRootParameter[1].InitAsDescriptorTable(1, &srvTable);
+				slotRootParameter[2].InitAsDescriptorTable(1, &uavTable);
+			
+				// A root signature is an array of root parameters.
+				CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(3, slotRootParameter,
+					0, nullptr,
+					D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+			
+				// create a root signature with a single slot which points to a descriptor range consisting of a single constant buffer
+				ComPtr<ID3DBlob> serializedRootSig = nullptr;
+				ComPtr<ID3DBlob> errorBlob = nullptr;
+				HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+					serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
+			
+				if (errorBlob != nullptr)
+				{
+					::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+				}
+				ThrowIfFailed(hr);
+			
+				ThrowIfFailed(pGL->d3dDevice->CreateRootSignature(
+					0,
+					serializedRootSig->GetBufferPointer(),
+					serializedRootSig->GetBufferSize(),
+					IID_PPV_ARGS(pRootSignature->postProcessRootSignature.GetAddressOf())));
+			}
 		}
 
-		ROOTCALL BuildFrameResources(SLO::GL* pGL, SLO::ResourceManager* pResourceManager)
+		ROOTCALL BuildFrameResources(SLO::GL* pGL, SLO::ResourceManager* pResourceManager, Waves* pWaves)
 		{
 			auto* device = pGL->d3dDevice.Get();
 
@@ -327,29 +365,39 @@ namespace SLP
 				frame->MaterialCB = std::make_unique<UploadBuffer<SLO::MaterialConstants>>(device, Global::MAX_MATERIAL_COUNT, true);
 				frame->ObjectCB = std::make_unique<UploadBuffer<SLO::ObjectConstants>>(device, Global::MAX_OBJECT_COUNT, true);
 
+				frame->WavesVB = std::make_unique<UploadBuffer<SLO::Vertex>>(device, pWaves->VertexCount(), false);
+
 				pResourceManager->frameResources.emplace_back(std::move(frame));
 			}
 		}
 
-		ROOTCALL BuildPSOs(SLO::GL* pGL, SLO::PSOManager* pPSOManager,
-			SLO::RootSignature* pRootSignature,
-			SLO::ShaderManager* pShaderManager)
+		ROOTCALL BuildInputLayer(SLO::PSOManager* pPSOManager)
 		{
-			auto& inputLayer = pPSOManager->inputLayout;
-			inputLayer =
+			pPSOManager->inputLayout =
 			{
 				{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 				{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 				{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 			};
 
+			pPSOManager->treeSpriteInputLayout =
+			{
+				{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+				{ "SIZE", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+			};
+		}
+
+		ROOTCALL BuildPSOs(SLO::GL* pGL, SLO::PSOManager* pPSOManager,
+			SLO::RootSignature* pRootSignature,
+			SLO::ShaderManager* pShaderManager)
+		{
 			D3D12_GRAPHICS_PIPELINE_STATE_DESC opaquePsoDesc;
 
 			//
 			// PSO for opaque objects.
 			//
 			ZeroMemory(&opaquePsoDesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
-			opaquePsoDesc.InputLayout = { inputLayer.data(), (UINT)inputLayer.size() };
+			opaquePsoDesc.InputLayout = { pPSOManager->inputLayout.data(), (UINT)pPSOManager->inputLayout.size() };
 			opaquePsoDesc.pRootSignature = pRootSignature->rootSignature.Get();
 			opaquePsoDesc.VS =
 			{
@@ -481,79 +529,307 @@ namespace SLP
 			D3D12_GRAPHICS_PIPELINE_STATE_DESC shadowPsoDesc = transparentPsoDesc;
 			shadowPsoDesc.DepthStencilState = shadowDSS;
 			ThrowIfFailed(pGL->d3dDevice->CreateGraphicsPipelineState(&shadowPsoDesc, IID_PPV_ARGS(&pPSOManager->PSOs[(int)SLO::RenderLayer::Shadow])));
+
+			//
+			// PSO for alpha tested objects
+			//
+
+			D3D12_GRAPHICS_PIPELINE_STATE_DESC alphaTestedPsoDesc = opaquePsoDesc;
+			alphaTestedPsoDesc.PS =
+			{
+				reinterpret_cast<BYTE*>(pShaderManager->shaders["alphaTestedPS"]->GetBufferPointer()),
+				pShaderManager->shaders["alphaTestedPS"]->GetBufferSize()
+			};
+			alphaTestedPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+			ThrowIfFailed(pGL->d3dDevice->CreateGraphicsPipelineState(&alphaTestedPsoDesc, IID_PPV_ARGS(&pPSOManager->PSOs[(int)SLO::RenderLayer::AlphaTested])));
+			
+			//
+			// PSO for tree sprites
+			//
+			D3D12_GRAPHICS_PIPELINE_STATE_DESC treeSpritePsoDesc = opaquePsoDesc;
+			treeSpritePsoDesc.VS =
+			{
+				reinterpret_cast<BYTE*>(pShaderManager->shaders["treeSpriteVS"]->GetBufferPointer()),
+				pShaderManager->shaders["treeSpriteVS"]->GetBufferSize()
+			};
+			treeSpritePsoDesc.GS =
+			{
+				reinterpret_cast<BYTE*>(pShaderManager->shaders["treeSpriteGS"]->GetBufferPointer()),
+				pShaderManager->shaders["treeSpriteGS"]->GetBufferSize()
+			};
+			treeSpritePsoDesc.PS =
+			{
+				reinterpret_cast<BYTE*>(pShaderManager->shaders["treeSpritePS"]->GetBufferPointer()),
+				pShaderManager->shaders["treeSpritePS"]->GetBufferSize()
+			};
+			treeSpritePsoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
+			treeSpritePsoDesc.InputLayout = { pPSOManager->treeSpriteInputLayout.data(), (UINT)pPSOManager->treeSpriteInputLayout.size() };
+			treeSpritePsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+
+			ThrowIfFailed(pGL->d3dDevice->CreateGraphicsPipelineState(&treeSpritePsoDesc, IID_PPV_ARGS(&pPSOManager->PSOs[(int)SLO::RenderLayer::AlphaTestedTreeSprites])));
+
+			//
+			// PSO for horizontal blur
+			//
+			D3D12_COMPUTE_PIPELINE_STATE_DESC horzBlurPSO = {};
+			horzBlurPSO.pRootSignature = pRootSignature->postProcessRootSignature.Get();
+			horzBlurPSO.CS =
+			{
+				reinterpret_cast<BYTE*>(pShaderManager->shaders["horzBlurCS"]->GetBufferPointer()),
+				pShaderManager->shaders["horzBlurCS"]->GetBufferSize()
+			};
+			horzBlurPSO.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+			ThrowIfFailed(pGL->d3dDevice->CreateComputePipelineState(&horzBlurPSO, IID_PPV_ARGS(&pPSOManager->PSOs[(int)SLO::RenderLayer::HorzBlur])));
+			
+			//
+			// PSO for vertical blur
+			//
+			D3D12_COMPUTE_PIPELINE_STATE_DESC vertBlurPSO = {};
+			vertBlurPSO.pRootSignature = pRootSignature->postProcessRootSignature.Get();
+			vertBlurPSO.CS =
+			{
+				reinterpret_cast<BYTE*>(pShaderManager->shaders["vertBlurCS"]->GetBufferPointer()),
+				pShaderManager->shaders["vertBlurCS"]->GetBufferSize()
+			};
+			vertBlurPSO.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+			ThrowIfFailed(pGL->d3dDevice->CreateComputePipelineState(&vertBlurPSO, IID_PPV_ARGS(&pPSOManager->PSOs[(int)SLO::RenderLayer::VertBlur])));
 		}
 
-		ROOTCALL InitializeUtils(Camera* pCamera)
+		ROOTCALL BuildMeshes(SLO::GeometryManager* pGeometryManager)
 		{
-			pCamera->SetPosition(0.0f, 2.0f, -15.0f);
+			SLP2G::GDelayCall::CreateMesh(pGeometryManager, "skullGeo", L"Models\\skull.txt");
+			SLP2G::GDelayCall::CreateMesh(pGeometryManager, "carGeo", L"Models\\car.txt");
 		}
+
+		ROOTCALL BuildTextures(SLO::TextureManager* pTextureManager)
+		{
+			SLP2G::GDelayCall::CreateTexture(pTextureManager, "bricksTex", L"Textures/bricks3.dds");
+			SLP2G::GDelayCall::CreateTexture(pTextureManager, "checkboardTex", L"Textures/checkboard.dds");
+			SLP2G::GDelayCall::CreateTexture(pTextureManager, "iceTex", L"Textures/ice.dds");
+			SLP2G::GDelayCall::CreateTexture(pTextureManager, "white1x1Tex", L"Textures/white1x1.dds");
+			SLP2G::GDelayCall::CreateTexture(pTextureManager, "grassTex", L"Textures/grass.dds");
+			SLP2G::GDelayCall::CreateTexture(pTextureManager, "waterTex", L"Textures/water1.dds");
+			SLP2G::GDelayCall::CreateTexture(pTextureManager, "fenceTex", L"Textures/WireFence.dds");
+			SLP2G::GDelayCall::CreateTextureArray(pTextureManager, "treeArrayTex", L"Textures/treeArray2.dds");
+		}
+
+		ROOTCALL BuildActors(SLO::ActorCollection* pActorCollection, SLO::GeometryManager* pGeometryManager,
+			SLO::MaterialManager* pMaterialManager, SLO::RenderItemManager* pRenderItemManager)
+		{
+#define GEOGET(x) pGeometryManager->geometries[x].get()
+#define ACTORGET(x) pActorCollection->actors[x].get()
+#define MATGET(x) pMaterialManager->materials[x].get()
+
+			auto* waterGeo = GEOGET("waterGeo");
+			auto* landGeo = GEOGET("landGeo");
+			auto* boxGeo = GEOGET("boxGeo");
+			auto* treeSpritesGeo = GEOGET("treeSpritesGeo");
+			auto* roomGeo = GEOGET("roomGeo");
+			auto* skullGeo = GEOGET("skullGeo"); 
+
+			int waterId, landId, boxId, treeSpriteId, roomId, skullId;
+			SLP2G::GActor::CreateActor(pActorCollection, waterGeo, waterId);
+			SLP2G::GActor::CreateActor(pActorCollection, landGeo, landId);
+			SLP2G::GActor::CreateActor(pActorCollection, boxGeo, boxId);
+			SLP2G::GActor::CreateActor(pActorCollection, treeSpritesGeo, treeSpriteId);
+			//SLP2G::GActor::CreateActor(pActorCollection, roomGeo, roomId);
+			//SLP2G::GActor::CreateActor(pActorCollection, skullGeo, skullId);
+
+			auto* waterAct			= ACTORGET(waterId);
+			XMStoreFloat4x4(&waterAct->TexTransform, XMMatrixScaling(5.0f, 5.0f, 1.0f));
+			auto* landAct			= ACTORGET(landId);
+			XMStoreFloat4x4(&landAct->TexTransform, XMMatrixScaling(5.0f, 5.0f, 1.0f));
+			auto* boxAct			= ACTORGET(boxId);
+			XMStoreFloat4x4(&boxAct->World, XMMatrixTranslation(3.0f, 2.0f, -9.0f));
+			auto* treeSpritesAct	= ACTORGET(treeSpriteId);
+			//auto* roomAct			= ACTORGET(roomId);
+			//auto* skullAct		= ACTORGET(skullId);
+			
+			auto* grassMat			= MATGET("grass");
+			auto* waterMat			= MATGET("water");
+			auto* wirefenceMat		= MATGET("wirefence");
+			auto* treeSpritesMat	= MATGET("treeSprites");
+			auto* bricksMat			= MATGET("bricks");
+			auto* checkertileMat	= MATGET("checkertile");
+			auto* icemirrorMat		= MATGET("icemirror");
+			auto* skullMat			= MATGET("skullMat");
+			auto* shadowMat			= MATGET("shadowMat");
+
+			SLP2G::GRenderer::CreateRenderItem(waterAct, waterMat, pRenderItemManager, SLO::RenderLayer::Transparent);
+			pRenderItemManager->wavesRitem = pRenderItemManager->allritems[0].get();
+
+			SLP2G::GRenderer::CreateRenderItem(landAct, grassMat, pRenderItemManager, SLO::RenderLayer::Opaque);
+			SLP2G::GRenderer::CreateRenderItem(boxAct, wirefenceMat, pRenderItemManager, SLO::RenderLayer::AlphaTested);
+			SLP2G::GRenderer::CreateRenderItem(treeSpritesAct, treeSpritesMat, pRenderItemManager, 
+				SLO::RenderLayer::AlphaTestedTreeSprites, 0, D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
+			//SLP2G::GRenderer::CreateRenderItem(roomAct, checkertileMat, pRenderItemManager, SLO::RenderLayer::Opaque, 0);
+			//SLP2G::GRenderer::CreateRenderItem(roomAct, bricksMat, pRenderItemManager, SLO::RenderLayer::Opaque, 1);
+			//SLP2G::GRenderer::CreateRenderItem(skullAct, skullMat, pRenderItemManager, SLO::RenderLayer::Opaque, 0);
+			//SLP2G::GRenderer::CreateRenderItem(skullAct, skullMat, pRenderItemManager, SLO::RenderLayer::Reflected, 0);
+			//SLP2G::GRenderer::CreateRenderItem(skullAct, shadowMat, pRenderItemManager, SLO::RenderLayer::Shadow, 0);
+			//SLP2G::GRenderer::CreateRenderItem(roomAct, icemirrorMat, pRenderItemManager, SLO::RenderLayer::Mirrors, 2);
+			//SLP2G::GRenderer::CreateRenderItem(roomAct, icemirrorMat, pRenderItemManager, SLO::RenderLayer::Transparent, 2);
+		}
+
+		ROOTCALL BuildShaders(SLO::ShaderManager* pShaderManager)
+		{
+			const D3D_SHADER_MACRO defines[] =
+			{
+				"FOG", "1",
+				NULL, NULL
+			};
+
+			const D3D_SHADER_MACRO alphaTestDefines[] =
+			{
+				"FOG", "1",
+				"ALPHA_TEST", "1",
+				NULL, NULL
+			};
+
+			pShaderManager->shaders.emplace("standardVS", 
+				d3dUtil::CompileShader(L"Shaders\\Default.hlsl", nullptr, "VS", "vs_5_0"));
+			pShaderManager->shaders.emplace("opaquePS", 
+				d3dUtil::CompileShader(L"Shaders\\Default.hlsl", defines, "PS", "ps_5_0"));
+			pShaderManager->shaders.emplace("alphaTestedPS", 
+				d3dUtil::CompileShader(L"Shaders\\Default.hlsl", alphaTestDefines, "PS", "ps_5_0"));
+
+			pShaderManager->shaders.emplace("treeSpriteVS", 
+				d3dUtil::CompileShader(L"Shaders\\TreeSprite.hlsl", nullptr, "VS", "vs_5_0"));
+			pShaderManager->shaders.emplace("treeSpriteGS", 
+				d3dUtil::CompileShader(L"Shaders\\TreeSprite.hlsl", nullptr, "GS", "gs_5_0"));
+			pShaderManager->shaders.emplace("treeSpritePS", 
+				d3dUtil::CompileShader(L"Shaders\\TreeSprite.hlsl", alphaTestDefines, "PS", "ps_5_0"));
+
+			pShaderManager->shaders.emplace("horzBlurCS",
+				d3dUtil::CompileShader(L"Shaders\\Blur.hlsl", nullptr, "HorzBlurCS", "cs_5_0"));
+			pShaderManager->shaders.emplace("vertBlurCS",
+				d3dUtil::CompileShader(L"Shaders\\Blur.hlsl", nullptr, "VertBlurCS", "cs_5_0"));
+		}
+
+		ROOTCALL BuildMaterials(SLO::TextureManager* pTextureManager, SLO::MaterialManager* pMaterialManager)
+		{
+			using Material = SLO::Material;
+
+			int matIndexer = 0;
+
+			auto bricks = std::make_unique<Material>();
+			bricks->Name = "bricks";
+			bricks->MatCBIndex = matIndexer++;
+			bricks->DiffuseTex = pTextureManager->textures["bricksTex"].get();
+			bricks->DiffuseAlbedo = DirectX::XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+			bricks->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
+			bricks->Roughness = 0.25f;
+
+			auto checkertile = std::make_unique<Material>();
+			checkertile->Name = "checkertile";
+			checkertile->MatCBIndex = matIndexer++;
+			checkertile->DiffuseTex = pTextureManager->textures["checkboardTex"].get();
+			checkertile->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+			checkertile->FresnelR0 = XMFLOAT3(0.07f, 0.07f, 0.07f);
+			checkertile->Roughness = 0.3f;
+
+			auto icemirror = std::make_unique<Material>();
+			icemirror->Name = "icemirror";
+			icemirror->MatCBIndex = matIndexer++;
+			icemirror->DiffuseTex = pTextureManager->textures["iceTex"].get();
+			icemirror->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 0.3f);
+			icemirror->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
+			icemirror->Roughness = 0.5f;
+
+			auto skullMat = std::make_unique<Material>();
+			skullMat->Name = "skullMat";
+			skullMat->MatCBIndex = matIndexer++;
+			skullMat->DiffuseTex = pTextureManager->textures["white1x1Tex"].get();
+			skullMat->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+			skullMat->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
+			skullMat->Roughness = 0.3f;
+
+			auto shadowMat = std::make_unique<Material>();
+			shadowMat->Name = "shadowMat";
+			shadowMat->MatCBIndex = matIndexer++;
+			shadowMat->DiffuseTex = pTextureManager->textures["white1x1Tex"].get();
+			shadowMat->DiffuseAlbedo = XMFLOAT4(0.0f, 0.0f, 0.0f, 0.5f);
+			shadowMat->FresnelR0 = XMFLOAT3(0.001f, 0.001f, 0.001f);
+			shadowMat->Roughness = 0.0f;
+
+			auto grass = std::make_unique<Material>();
+			grass->Name = "grass";
+			grass->MatCBIndex = matIndexer++;
+			grass->DiffuseTex = pTextureManager->textures["grassTex"].get();
+			grass->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+			grass->FresnelR0 = XMFLOAT3(0.01f, 0.01f, 0.01f);
+			grass->Roughness = 0.125f;
+
+			// This is not a good water material definition, but we do not have all the rendering
+			// tools we need (transparency, environment reflection), so we fake it for now.
+			auto water = std::make_unique<Material>();
+			water->Name = "water";
+			water->MatCBIndex = matIndexer++;
+			water->DiffuseTex = pTextureManager->textures["waterTex"].get();
+			water->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 0.5f);
+			water->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
+			water->Roughness = 0.0f;
+
+			auto wirefence = std::make_unique<Material>();
+			wirefence->Name = "wirefence";
+			wirefence->MatCBIndex = matIndexer++;
+			wirefence->DiffuseTex = pTextureManager->textures["fenceTex"].get();
+			wirefence->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+			wirefence->FresnelR0 = XMFLOAT3(0.02f, 0.02f, 0.02f);
+			wirefence->Roughness = 0.25f;
+
+			auto treeSprites = std::make_unique<Material>();
+			treeSprites->Name = "treeSprites";
+			treeSprites->MatCBIndex = matIndexer++;
+			treeSprites->DiffuseTex = pTextureManager->textures["treeArrayTex"].get();
+			treeSprites->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+			treeSprites->FresnelR0 = XMFLOAT3(0.01f, 0.01f, 0.01f);
+			treeSprites->Roughness = 0.125f;
+
+			pMaterialManager->materials["bricks"] = std::move(bricks);
+			pMaterialManager->materials["checkertile"] = std::move(checkertile);
+			pMaterialManager->materials["icemirror"] = std::move(icemirror);
+			pMaterialManager->materials["skullMat"] = std::move(skullMat);
+			pMaterialManager->materials["shadowMat"] = std::move(shadowMat);
+			pMaterialManager->materials["grass"] = std::move(grass);
+			pMaterialManager->materials["water"] = std::move(water);
+			pMaterialManager->materials["wirefence"] = std::move(wirefence);
+			pMaterialManager->materials["treeSprites"] = std::move(treeSprites);
+		}
+
+	};
+
+	struct GAnimate
+	{
+		ROOTCALL AnimateMaterials(SLO::MaterialManager* pMaterialManager, GameTimer* pGameTimer)
+		{
+			// Scroll the water material texture coordinates.
+			auto waterMat = pMaterialManager->materials["water"].get();
+
+			float& tu = waterMat->MatTransform(3, 0);
+			float& tv = waterMat->MatTransform(3, 1);
+			
+			float dt = pGameTimer->DeltaTime();
+			tu += 0.1f * dt;
+			tv += 0.02f * dt;
+
+			if (tu >= 1.0f)
+				tu -= 1.0f;
+
+			if (tv >= 1.0f)
+				tv -= 1.0f;
+
+			waterMat->MatTransform(3, 0) = tu;
+			waterMat->MatTransform(3, 1) = tv;
+
+			// Material has changed, so need to update cbuffer.
+			waterMat->NumFramesDirty = Global::FRAME_RESOURCE_COUNT;
+		}
+
 	};
 
 	struct GUpdate
 	{
-		ROOTCALL UpdateGeometries(SLO::GL* pGL, SLO::CommandObject* pCommandObject, SLO::GeometryManager* pGeometryManager)
-		{
-			auto& queue = pGeometryManager->waitqueue;
-			if (queue.empty())
-				return;
-
-			while (!queue.empty())
-			{
-				auto item = queue.front();
-				queue.pop();
-
-				switch (HashCode(item.first.c_str()))
-				{
-				case HashCode("roomGeo"):
-					SLP2G::GGeometry::BuildRoomGeometry(pGL, pCommandObject, pGeometryManager);
-					break;
-				default:
-					SLP2G::GGeometry::BuildTxtGeometry(pGL, pCommandObject, pGeometryManager, item.first, item.second);
-				}
-			}
-		}
-
-		ROOTCALL UpdateTextures(SLO::TextureManager* pTextureManager, SLO::GL* pGL, SLO::CommandObject* pCommandObject, SLO::DescriptorHeap* pDescriptorHeap)
-		{
-			using Texture = SLO::Texture;
-
-			auto& queue = pTextureManager->waitqueue;
-			if (queue.empty())
-				return;
-
-			auto& map = pTextureManager->textures;
-			auto& device = pGL->d3dDevice;
-			auto& cmdList = pCommandObject->commandList;
-			while (!queue.empty())
-			{
-				auto item = queue.front();
-				queue.pop();
-
-				auto tex = std::make_unique<Texture>();
-				tex->name = item.first;
-				tex->filename = item.second;
-				ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(device.Get(), cmdList.Get(),
-					tex->filename.c_str(), tex->resource, tex->uploadHeap));
-
-				auto res = tex->resource;
-				tex->srvOffset = pDescriptorHeap->srvCount++;
-
-				D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-				srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-				srvDesc.Format = res->GetDesc().Format;
-				srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-				srvDesc.Texture2D.MostDetailedMip = 0;
-				srvDesc.Texture2D.MipLevels = -1;
-
-				CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor = SrvHeapHandle(pDescriptorHeap);
-				hDescriptor.Offset(tex->srvOffset, pDescriptorHeap->cbvSrvUavDescriptorSize);
-
-				device->CreateShaderResourceView(res.Get(), &srvDesc, hDescriptor);
-
-				map[tex->name] = std::move(tex);
-			}
-		}
-
 		ROOTCALL UpdateTimer(GameTimer* pGameTimer)
 		{
 			pGameTimer->Tick();
@@ -576,10 +852,10 @@ namespace SLP
 			}
 		}
 
-		ROOTCALL UpdateObjectCBs(SLO::ResourceManager* pResourceManager, SLO::RenderItemManager* pRenderItemManager)
+		ROOTCALL UpdateObjectCBs(SLO::ResourceManager* pResourceManager, SLO::ActorCollection* pActorCollection)
 		{
 			auto currObjectCB = pResourceManager->currFrameResource->ObjectCB.get();
-			for (auto& e : pRenderItemManager->allritems)
+			for (auto& e : pActorCollection->actors)
 			{
 				// Only update the cbuffer data if the constants have changed.  
 				// This needs to be tracked per frame resource.
@@ -629,7 +905,8 @@ namespace SLP
 		ROOTCALL UpdateMainPassCB(Camera* pCamera, SLO::ResourceManager* pResourceManager, SLO::GL* pGL, GameTimer* pGameTimer)
 		{
 			XMMATRIX view = pCamera->GetView();
-			XMMATRIX proj = pCamera->GetOrtho();
+			XMMATRIX proj = pCamera->GetProj();
+			//XMMATRIX proj = pCamera->GetOrtho();
 
 			XMMATRIX viewProj = XMMatrixMultiply(view, proj);
 			XMMATRIX invView = XMMatrixInverse(&XMMatrixDeterminant(view), view);
@@ -683,6 +960,63 @@ namespace SLP
 			currPassCB->CopyData(1, pResourceManager->reflectedPassCB);
 		}
 
+		ROOTCALL UpdateWaves(GameTimer* pGameTimer, Waves* pWaves, SLO::ResourceManager* pResourceManager, 
+			SLO::RenderItemManager* pRenderItemManager)
+		{
+			if (nullptr == pRenderItemManager->wavesRitem)
+				return;
+
+			// Every quarter second, generate a random wave.
+			static float t_base = 0.0f;
+			if ((pGameTimer->TotalTime() - t_base) >= 0.25f)
+			{
+				t_base += 0.25f;
+
+				int i = MathHelper::Rand(4, pWaves->RowCount() - 5);
+				int j = MathHelper::Rand(4, pWaves->ColumnCount() - 5);
+
+				float r = MathHelper::RandF(0.2f, 0.5f);
+
+				pWaves->Disturb(i, j, r);
+			}
+
+			// Update the wave simulation.
+			pWaves->Update(pGameTimer->DeltaTime());
+
+			// Update the wave vertex buffer with the new solution.
+			auto currWavesVB = pResourceManager->currFrameResource->WavesVB.get();
+			for (int i = 0; i < pWaves->VertexCount(); ++i)
+			{
+				SLO::Vertex v;
+
+				v.Pos = pWaves->Position(i);
+				v.Normal = pWaves->Normal(i);
+
+				// Derive tex-coords from position by 
+				// mapping [-w/2,w/2] --> [0,1]
+				v.TexC.x = 0.5f + v.Pos.x / pWaves->Width();
+				v.TexC.y = 0.5f - v.Pos.z / pWaves->Depth();
+
+				currWavesVB->CopyData(i, v);
+			}
+
+			// Set the dynamic VB of the wave renderitem to the current frame VB.
+			pRenderItemManager->wavesRitem->Act->Geo->VertexBufferGPU = currWavesVB->Resource();
+		}
+
+	};
+
+	struct GTimer
+	{
+		FASTCALL Restart(GameTimer* pGameTimer)
+		{
+			pGameTimer->Start();
+		}
+
+		FASTCALL Pause(GameTimer* pGameTimer)
+		{
+			pGameTimer->Stop();
+		}
 	};
 
 	struct GInput
@@ -715,9 +1049,9 @@ namespace SLP
 				float dx = 0.005f * static_cast<float>(x - pMouse->lastMousePos.x);
 				float dy = 0.005f * static_cast<float>(y - pMouse->lastMousePos.y);
 
-				//mCamera.Pitch(dy);
-				//mCamera.RotateY(dx); 
-				pCamera->Move(-dx, dy, 0.0f);
+				pCamera->Pitch(dy);
+				pCamera->RotateY(dx); 
+				//pCamera->Move(-dx, dy, 0.0f);
 			}
 
 			pMouse->lastMousePos.x = x;
@@ -756,6 +1090,11 @@ namespace SLP
 		{
 			pGL->clientWidth = width;
 			pGL->clientHeight = height;
+		}
+
+		ROOTCALL ResetBlur(BlurFilter* pBlurFilter, int width, int height)
+		{
+			pBlurFilter->OnResize(width, height);
 		}
 
 		ROOTCALL ResetChainBuffer(SLO::GL* pGL, SLO::DescriptorHeap* pDescriptorHeap)
@@ -845,7 +1184,8 @@ namespace SLP
 
 			pGL->scissorRect = { 0, 0, pGL->clientWidth, pGL->clientHeight };
 
-			pCamera->SetOrtho(viewport.Width, viewport.Height, 1.0f, 1000.0f);
+			pCamera->SetLens(pCamera->GetFovY(), pCamera->GetAspect(), Global::SCREEN_NEAR, Global::SCREEN_DEPTH);
+			//pCamera->SetOrtho(viewport.Width, viewport.Height, 1.0f, 1000.0f);
 		}
 
 		ROOTCALL Begin(SLO::GL* pGL, SLO::CommandObject* pCommandObject)
@@ -861,15 +1201,17 @@ namespace SLP
 		ROOTCALL SetRenderTarget(SLO::DescriptorHeap* pDescriptorHeap, SLO::GL* pGL, SLO::CommandObject* pCommandObject,
 			SLO::ResourceManager* pResourceManager)
 		{
-			auto currentBackBufferView = BackBufferView(pDescriptorHeap, pGL->currBackBuffer);
-			auto depthstencilView = DepthStencilView(pDescriptorHeap);
+			const auto& currentBackBufferView = CurrentBackBufferView(pDescriptorHeap, pGL);
+			const auto& depthstencilView = DepthStencilView(pDescriptorHeap);
+
+			auto& cmdList = pCommandObject->commandList;
 
 			// Clear the back buffer and depth buffer.
-			pCommandObject->commandList->ClearRenderTargetView(currentBackBufferView, (float*)&(pResourceManager->mainPassCB.FogColor), 0, nullptr);
-			pCommandObject->commandList->ClearDepthStencilView(depthstencilView, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+			cmdList->ClearRenderTargetView(currentBackBufferView, (float*)&(pResourceManager->mainPassCB.FogColor), 0, nullptr);
+			cmdList->ClearDepthStencilView(depthstencilView, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
 			// Specify the buffers we are going to render to.
-			pCommandObject->commandList->OMSetRenderTargets(1, &currentBackBufferView, true, &depthstencilView);
+			cmdList->OMSetRenderTargets(1, &currentBackBufferView, true, &depthstencilView);
 		}
 
 		ROOTCALL SetDescriptorHeaps(SLO::DescriptorHeap* pDescriptorHeap, SLO::CommandObject* pCommandObject)
@@ -902,28 +1244,29 @@ namespace SLP
 
 			auto* objectCB = pResourceManager->currFrameResource->ObjectCB->Resource();
 			auto* matCB = pResourceManager->currFrameResource->MaterialCB->Resource();
-
+			
 			auto& renderBundle = pRenderItemManager->ritemLayer[(int)layer];
-
+			
 			// For each render item...
 			for (size_t i = 0; i < renderBundle.items.size(); ++i)
 			{
 				auto ri = renderBundle.items[i];
-
-				cmdList->IASetVertexBuffers(0, 1, &ri->Geo->VertexBufferView());
-				cmdList->IASetIndexBuffer(&ri->Geo->IndexBufferView());
+				auto* actor = ri->Act;
+			
+				cmdList->IASetVertexBuffers(0, 1, &actor->Geo->VertexBufferView());
+				cmdList->IASetIndexBuffer(&actor->Geo->IndexBufferView());
 				cmdList->IASetPrimitiveTopology(ri->PrimitiveType);
-
+				
 				CD3DX12_GPU_DESCRIPTOR_HANDLE tex(pDescriptorHeap->srvHeap->GetGPUDescriptorHandleForHeapStart());
 				tex.Offset(ri->Mat->DiffuseTex->srvOffset, pDescriptorHeap->cbvSrvUavDescriptorSize);
-
-				D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + ri->ObjCBIndex * objCBByteSize;
+				
+				D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = objectCB->GetGPUVirtualAddress() + actor->ObjCBIndex * objCBByteSize;
 				D3D12_GPU_VIRTUAL_ADDRESS matCBAddress = matCB->GetGPUVirtualAddress() + ri->Mat->MatCBIndex * matCBByteSize;
-
+				
 				cmdList->SetGraphicsRootDescriptorTable(0, tex);
 				cmdList->SetGraphicsRootConstantBufferView(Global::OBJECTCB_PARAMETER_INDEX, objCBAddress);
 				cmdList->SetGraphicsRootConstantBufferView(Global::MATCB_PARAMETER_INDEX, matCBAddress);
-
+				
 				cmdList->DrawIndexedInstanced(ri->IndexCount, 1, ri->StartIndexLocation, ri->BaseVertexLocation, 0);
 			}
 		}
@@ -935,113 +1278,92 @@ namespace SLP
 				D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 		}
 
+		ROOTCALL PostProcess(BlurFilter* pBlurFilter, SLO::CommandObject* pCommandObject, SLO::RootSignature* pRootSignature,
+			SLO::PSOManager* pPSOManager, SLO::GL* pGL)
+		{
+			auto* commandList = pCommandObject->commandList.Get();
+
+			pBlurFilter->Execute(commandList, pRootSignature->postProcessRootSignature.Get(),
+				pPSOManager->PSOs[(int)SLO::RenderLayer::HorzBlur].Get(),
+				pPSOManager->PSOs[(int)SLO::RenderLayer::VertBlur].Get(),
+				CurrentBackBuffer(pGL), 4);
+
+			// Prepare to copy blurred output to the back buffer.
+			commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(pGL),
+				D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST));
+
+			commandList->CopyResource(CurrentBackBuffer(pGL), pBlurFilter->Output());
+
+			// Transition to PRESENT state.
+			commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(pGL),
+				D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT));
+
+		}
+
 		ROOTCALL SwapChainBuffer(SLO::GL* pGL)
 		{
 			// Swap the back and front buffers
 			ThrowIfFailed(pGL->swapChain->Present(0, 0));
 			pGL->currBackBuffer = (pGL->currBackBuffer + 1) % Global::SWAP_CHAIN_BUFFER_COUNT;
 		}
+
 	};
 
-	struct GForTest
+	struct GPostProcess
 	{
-		ROOTCALL BuildTextures(SLO::TextureManager* pTextureManager)
+		ROOTCALL ProcessMeshes(SLO::GL* pGL, SLO::CommandObject* pCommandObject, SLO::GeometryManager* pGeometryManager)
 		{
-			SLP::GConstruct::CreateTexture(pTextureManager, "bricksTex", L"Textures/bricks3.dds");
-			SLP::GConstruct::CreateTexture(pTextureManager, "checkboardTex", L"Textures/checkboard.dds");
-			SLP::GConstruct::CreateTexture(pTextureManager, "iceTex", L"Textures/ice.dds");
-			SLP::GConstruct::CreateTexture(pTextureManager, "white1x1Tex", L"Textures/white1x1.dds");
-		}
+			auto& queue = pGeometryManager->waitqueue;
+			if (queue.empty())
+				return;
 
-		ROOTCALL BuildRenderItems(SLO::MaterialManager* pMaterialManager, SLO::GeometryManager* pGeometryManager, SLO::RenderItemManager* pRenderItemManager)
-		{
-			auto* matbricks = pMaterialManager->materials["bricks"].get();
-			auto* matcheckertile = pMaterialManager->materials["checkertile"].get();
-			auto* maticemirror = pMaterialManager->materials["icemirror"].get();
-			auto* matskullMat = pMaterialManager->materials["skullMat"].get();
-			auto* matshadowMat = pMaterialManager->materials["shadowMat"].get();
-			auto* roomGeo = pGeometryManager->geometries["roomGeo"].get();
-			auto* skullGeo = pGeometryManager->geometries["skullGeo"].get();
-			SLP::GConstruct::CreateRenderItem(matcheckertile, roomGeo, pRenderItemManager, SLO::RenderLayer::Opaque, 0);
-			SLP::GConstruct::CreateRenderItem(matbricks, roomGeo, pRenderItemManager, SLO::RenderLayer::Opaque, 1);
-			SLP::GConstruct::CreateRenderItem(matskullMat, skullGeo, pRenderItemManager, SLO::RenderLayer::Opaque, 0);
-			SLP::GConstruct::CreateRenderItem(matskullMat, skullGeo, pRenderItemManager, SLO::RenderLayer::Reflected, 0);
-			SLP::GConstruct::CreateRenderItem(matshadowMat, skullGeo, pRenderItemManager, SLO::RenderLayer::Shadow, 0);
-			SLP::GConstruct::CreateRenderItem(maticemirror, roomGeo, pRenderItemManager, SLO::RenderLayer::Mirrors, 2);
-			SLP::GConstruct::CreateRenderItem(maticemirror, roomGeo, pRenderItemManager, SLO::RenderLayer::Transparent, 2);
-		}
-
-		ROOTCALL BuildShaders(SLO::ShaderManager* pShaderManager)
-		{
-			const D3D_SHADER_MACRO defines[] =
+			while (!queue.empty())
 			{
-				"FOG", "1",
-				NULL, NULL
-			};
+				auto item = queue.front();
+				queue.pop();
 
-			const D3D_SHADER_MACRO alphaTestDefines[] =
-			{
-				"FOG", "1",
-				"ALPHA_TEST", "1",
-				NULL, NULL
-			};
-
-			pShaderManager->shaders.emplace("standardVS", d3dUtil::CompileShader(L"Shaders\\Default.hlsl", nullptr, "VS", "vs_5_0"));
-			pShaderManager->shaders.emplace("opaquePS", d3dUtil::CompileShader(L"Shaders\\Default.hlsl", defines, "PS", "vs_5_0"));
-			pShaderManager->shaders.emplace("alphaTestedPS", d3dUtil::CompileShader(L"Shaders\\Default.hlsl", alphaTestDefines, "PS", "vs_5_0"));
+				SLP2G::GMesh::BuildTxtGeometry(pGL, pCommandObject, pGeometryManager, item.first, item.second);
+			}
 		}
 
-		ROOTCALL BuildMaterials(SLO::TextureManager* pTextureManager, SLO::MaterialManager* pMaterialManager)
+		ROOTCALL ProcessTextures(SLO::TextureManager* pTextureManager, SLO::GL* pGL, SLO::CommandObject* pCommandObject, 
+			SLO::DescriptorHeap* pDescriptorHeap)
 		{
-			using Material = SLO::Material;
+			using Texture = SLO::Texture;
 
-			auto bricks = std::make_unique<Material>();
-			bricks->Name = "bricks";
-			bricks->MatCBIndex = 0;
-			bricks->DiffuseTex = pTextureManager->textures["bricks"].get();
-			bricks->DiffuseAlbedo = DirectX::XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-			bricks->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
-			bricks->Roughness = 0.25f;
+			auto& queue = pTextureManager->waitqueue;
+			if (queue.empty())
+				return;
 
-			auto checkertile = std::make_unique<Material>();
-			checkertile->Name = "checkertile";
-			checkertile->MatCBIndex = 1;
-			checkertile->DiffuseTex = pTextureManager->textures["checkboardTex"].get();
-			checkertile->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-			checkertile->FresnelR0 = XMFLOAT3(0.07f, 0.07f, 0.07f);
-			checkertile->Roughness = 0.3f;
+			auto& map = pTextureManager->textures;
+			auto& device = pGL->d3dDevice;
+			auto& cmdList = pCommandObject->commandList;
+			while (!queue.empty())
+			{
+				auto item = queue.front();
+				queue.pop();
 
-			auto icemirror = std::make_unique<Material>();
-			icemirror->Name = "icemirror";
-			icemirror->MatCBIndex = 2;
-			icemirror->DiffuseTex = pTextureManager->textures["iceTex"].get();
-			icemirror->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 0.3f);
-			icemirror->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
-			icemirror->Roughness = 0.5f;
+				auto tex = std::make_unique<Texture>();
+				tex->name = item.name;
+				tex->filename = item.filename;
+				ThrowIfFailed(DirectX::CreateDDSTextureFromFile12(device.Get(), cmdList.Get(),
+					tex->filename.c_str(), tex->resource, tex->uploadHeap));
 
-			auto skullMat = std::make_unique<Material>();
-			skullMat->Name = "skullMat";
-			skullMat->MatCBIndex = 3;
-			skullMat->DiffuseTex = pTextureManager->textures["white1x1Tex"].get();
-			skullMat->DiffuseAlbedo = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-			skullMat->FresnelR0 = XMFLOAT3(0.05f, 0.05f, 0.05f);
-			skullMat->Roughness = 0.3f;
+				auto res = tex->resource;
+				tex->srvOffset = pDescriptorHeap->srvCount++;
 
-			auto shadowMat = std::make_unique<Material>();
-			shadowMat->Name = "shadowMat";
-			shadowMat->MatCBIndex = 4;
-			shadowMat->DiffuseTex = pTextureManager->textures["white1x1Tex"].get();
-			shadowMat->DiffuseAlbedo = XMFLOAT4(0.0f, 0.0f, 0.0f, 0.5f);
-			shadowMat->FresnelR0 = XMFLOAT3(0.001f, 0.001f, 0.001f);
-			shadowMat->Roughness = 0.0f;
+				D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = item.srvDesc;
+				srvDesc.Format = res->GetDesc().Format;
+				srvDesc.Texture2DArray.ArraySize = res->GetDesc().DepthOrArraySize;
 
-			pMaterialManager->materials["bricks"] = std::move(bricks);
-			pMaterialManager->materials["checkertile"] = std::move(checkertile);
-			pMaterialManager->materials["icemirror"] = std::move(icemirror);
-			pMaterialManager->materials["skullMat"] = std::move(skullMat);
-			pMaterialManager->materials["shadowMat"] = std::move(shadowMat);
+				CD3DX12_CPU_DESCRIPTOR_HANDLE hDescriptor = SrvHeapHandle(pDescriptorHeap);
+				hDescriptor.Offset(tex->srvOffset, pDescriptorHeap->cbvSrvUavDescriptorSize);
+
+				device->CreateShaderResourceView(res.Get(), &srvDesc, hDescriptor);
+
+				map[tex->name] = std::move(tex);
+			}
 		}
-
 	};
 
 }

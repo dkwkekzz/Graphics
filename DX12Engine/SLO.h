@@ -5,15 +5,19 @@
 #include "d3dUtil.h"
 #include "UploadBuffer.h"
 
-#include "Camera.h"
-#include "GameTimer.h"
+#define ROOTCALL static void
+#define FASTCALL __forceinline static void
+
+using namespace Microsoft::WRL;
+using namespace DirectX;
+
 
 namespace SLO
 {
 	struct GL
 	{
-		Microsoft::WRL::ComPtr<IDXGIFactory4> dxgiFactory;
 		Microsoft::WRL::ComPtr<ID3D12Device> d3dDevice;
+		Microsoft::WRL::ComPtr<IDXGIFactory4> dxgiFactory;
 		D3D_DRIVER_TYPE d3dDriverType = D3D_DRIVER_TYPE_HARDWARE;
 
 		//Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue;
@@ -87,6 +91,7 @@ namespace SLO
 	struct RootSignature
 	{
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature = nullptr;
+		Microsoft::WRL::ComPtr<ID3D12RootSignature> postProcessRootSignature = nullptr;
 	};
 
 	struct Texture
@@ -100,9 +105,16 @@ namespace SLO
 		int srvOffset;
 	};
 
+	struct TextureCreateDesc
+	{
+		std::string name;
+		std::wstring filename;
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc;
+	};
+
 	struct TextureManager
 	{
-		std::queue<std::pair<std::string, std::wstring> > waitqueue;
+		std::queue<TextureCreateDesc> waitqueue;
 		std::unordered_map<std::string, std::unique_ptr<Texture>> textures;
 	};
 
@@ -284,20 +296,22 @@ namespace SLO
 
 	enum class RenderLayer : int
 	{
-		None = 0,
-		Opaque,
+		Opaque = 0,
 		Mirrors,
 		Reflected,
 		Transparent,
 		Shadow,
+		AlphaTested,
+		AlphaTestedTreeSprites,
+		HorzBlur,
+		VertBlur,
 		Count
 	};
 
-	// Lightweight structure stores parameters to draw a shape.  This will
-	// vary from app-to-app.
-	struct RenderItem
+	struct Actor
 	{
-		RenderItem() = default;
+		// Index into GPU constant buffer corresponding to the ObjectCB for this render item.
+		UINT ObjCBIndex = -1;
 
 		// World matrix of the shape that describes the object's local space
 		// relative to the world space, which defines the position, orientation,
@@ -312,14 +326,40 @@ namespace SLO
 		// NumFramesDirty = gNumFrameResources so that each frame resource gets the update.
 		int NumFramesDirty = Global::FRAME_RESOURCE_COUNT;
 
-		// Index into GPU constant buffer corresponding to the ObjectCB for this render item.
-		UINT ObjCBIndex = -1;
-
-		Material* Mat = nullptr;
 		MeshGeometry* Geo = nullptr;
+	};
+
+	struct ActorCollection
+	{
+		std::vector<std::unique_ptr<Actor> > actors;
+	};
+
+	// Lightweight structure stores parameters to draw a shape.  This will
+	// vary from app-to-app.
+	struct RenderItem
+	{
+		//// World matrix of the shape that describes the object's local space
+		//// relative to the world space, which defines the position, orientation,
+		//// and scale of the object in the world.
+		//DirectX::XMFLOAT4X4 World = MathHelper::Identity4x4();
+		//
+		//DirectX::XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
+		//
+		//// Dirty flag indicating the object data has changed and we need to update the constant buffer.
+		//// Because we have an object cbuffer for each FrameResource, we have to apply the
+		//// update to each FrameResource.  Thus, when we modify obect data we should set 
+		//// NumFramesDirty = gNumFrameResources so that each frame resource gets the update.
+		//int NumFramesDirty = Global::FRAME_RESOURCE_COUNT;
+		//
+		//
+		//// Index into GPU constant buffer corresponding to the ObjectCB for this render item.
+		//UINT ObjCBIndex = -1;
+
+		Actor* Act = nullptr;
+		Material* Mat = nullptr;
 
 		// Primitive topology.
-		D3D12_PRIMITIVE_TOPOLOGY PrimitiveType = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		D3D12_PRIMITIVE_TOPOLOGY PrimitiveType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 
 		// DrawIndexedInstanced parameters.
 		UINT IndexCount = 0;
@@ -336,10 +376,11 @@ namespace SLO
 	{
 		// List of all the render items.
 		std::vector<std::unique_ptr<RenderItem>> allritems;
-		int itemCount = 0;
 
 		// Render items divided by PSO.
 		RenderBundle ritemLayer[(int)RenderLayer::Count];
+
+		RenderItem* wavesRitem = nullptr;
 	};
 
 	struct FrameResource
@@ -354,6 +395,10 @@ namespace SLO
 		std::unique_ptr<UploadBuffer<PassConstants>> PassCB = nullptr;
 		std::unique_ptr<UploadBuffer<MaterialConstants>> MaterialCB = nullptr;
 		std::unique_ptr<UploadBuffer<ObjectConstants>> ObjectCB = nullptr;
+
+		// We cannot update a dynamic vertex buffer until the GPU is done processing
+		// the commands that reference it.  So each frame needs their own.
+		std::unique_ptr<UploadBuffer<Vertex>> WavesVB = nullptr;
 
 		// Fence value to mark commands up to this fence point.  This lets us
 		// check if these frame resources are still in use by the GPU.
@@ -372,12 +417,18 @@ namespace SLO
 
 	struct PSOManager
 	{
-		std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout;
+		std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout; 
+		std::vector<D3D12_INPUT_ELEMENT_DESC> treeSpriteInputLayout; 
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> PSOs[(int)RenderLayer::Count];
 	};
 
 	struct Mouse
 	{
 		POINT lastMousePos;
+	};
+
+	struct GraphicOption
+	{
+		bool useBlur = false;
 	};
 }

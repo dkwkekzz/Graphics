@@ -12,5 +12,5 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
     if (!engine.Init())
         return 0;
 
-    engine.Run();
+    return engine.Run();
 }

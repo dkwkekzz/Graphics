@@ -1,7 +1,8 @@
 // Engine.cpp
 #include "framework.h"
 #include "Engine.h"
-#include "../DX12Engine/DX12Engine.h"
+#include "P1G.h"
+
 
 LRESULT CALLBACK
 MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -80,8 +81,6 @@ int Engine::Run()
 
 	MSG msg = { 0 };
 
-	m_timer.Reset();
-
 	while (msg.message != WM_QUIT)
 	{
 		// If there are Window messages then process them.
@@ -93,11 +92,12 @@ int Engine::Run()
 		// Otherwise, do animation/game stuff.
 		else
 		{
-			m_timer.Tick();
-
 			if (!mAppPaused)
 			{
 				CalculateFrameStats();
+
+				P1G::Update::OnUpdate();
+
 				DX12Engine::OnTick(mAppPaused);
 				DX12Engine::OnDraw();
 			}
@@ -122,12 +122,12 @@ LRESULT Engine::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		if (LOWORD(wParam) == WA_INACTIVE)
 		{
 			mAppPaused = true;
-			m_timer.Stop();
+			DX12Engine::OnPause();
 		}
 		else
 		{
 			mAppPaused = false;
-			m_timer.Start();
+			DX12Engine::OnRestart();
 		}
 		return 0;
 
@@ -192,7 +192,7 @@ LRESULT Engine::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_ENTERSIZEMOVE:
 		mAppPaused = true;
 		mResizing = true;
-		m_timer.Stop();
+		DX12Engine::OnPause();
 		return 0;
 
 		// WM_EXITSIZEMOVE is sent when the user releases the resize bars.
@@ -200,7 +200,7 @@ LRESULT Engine::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_EXITSIZEMOVE:
 		mAppPaused = false;
 		mResizing = false;
-		m_timer.Start();
+		DX12Engine::OnRestart();
 		DX12Engine::OnResize(mClientWidth, mClientHeight);
 		return 0;
 
@@ -262,7 +262,7 @@ void Engine::CalculateFrameStats()
 	frameCnt++;
 
 	// Compute averages over one second period.
-	if ((m_timer.TotalTime() - timeElapsed) >= 1.0f)
+	if ((DX12Engine::GetTotalTime() - timeElapsed) >= 1.0f)
 	{
 		float fps = (float)frameCnt; // fps = frameCnt / 1
 		float mspf = 1000.0f / fps;
