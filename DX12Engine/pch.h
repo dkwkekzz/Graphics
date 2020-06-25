@@ -7,9 +7,10 @@
 #ifndef PCH_H
 #define PCH_H
 
-// 여기에 미리 컴파일하려는 헤더 추가
-#define WIN32_LEAN_AND_MEAN             // 거의 사용되지 않는 내용을 Windows 헤더에서 제외합니다.
+#pragma comment(lib, "d3d12.lib")
+#pragma comment(lib, "dxgi.lib")
 
+// 여기에 미리 컴파일하려는 헤더 추가
 #if defined(DEBUG) || defined(_DEBUG)
 #define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
@@ -39,12 +40,26 @@
 #include <algorithm>
 #include <vector>
 #include <array>
+#include <queue>
 #include <unordered_map>
+#include <map>
 #include <cstdint>
 #include <fstream>
 #include <sstream>
 #include <cassert>
 #include <cmath>
-#include <queue>
+#include <thread>
+#include <mutex>
+
+#include "d3dx12.h"
+#include "../Common/Utility.h"
+#include "../Common/VectorMath.h"
+#include "../Common/EngineTuning.h"
+//#include "../Common/EngineProfiling.h"
+
+#define WIN32_LEAN_AND_MEAN             // 거의 사용되지 않는 내용을 Windows 헤더에서 제외합니다.
+#define MY_IID_PPV_ARGS IID_PPV_ARGS
+#define D3D12_GPU_VIRTUAL_ADDRESS_NULL      ((D3D12_GPU_VIRTUAL_ADDRESS)0)
+#define D3D12_GPU_VIRTUAL_ADDRESS_UNKNOWN   ((D3D12_GPU_VIRTUAL_ADDRESS)-1)
 
 #endif //PCH_H
