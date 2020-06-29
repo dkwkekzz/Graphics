@@ -4,6 +4,12 @@
 #include "ColorBuffer.h"
 #include "RootSignature.h"
 #include "PipelineState.h"
+#include "CommandSignature.h"
+#include "GpuBuffer.h"
+#include "DescriptorHeap.h"
+#include "DepthBuffer.h"
+#include "ShadowBuffer.h"
+#include "EsramAllocator.h"
 
 using namespace Microsoft::WRL;
 
@@ -12,16 +18,6 @@ constexpr DXGI_FORMAT SWAP_CHAIN_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM;
 
 struct sloGraphicsCore
 {
-    ID3D12Device* mDevice;
-    //CommandListManager mCommandManager;
-    //ContextManager mContextManager;
-    //
-    //DescriptorAllocator mDescriptorAllocator[];
-    //
-    //RootSignature mGenerateMipsRS;
-    //ComputePSO mGenerateMipsLinearPSO[4];
-    //ComputePSO mGenerateMipsGammaPSO[4];
-    
     enum eResolution { k720p, k900p, k1080p, k1440p, k1800p, k2160p };
     
 #ifndef RELEASE
@@ -51,54 +47,9 @@ struct sloGraphicsCore
     uint32_t mDisplayHeight = 1080;
     ColorBuffer mPreDisplayBuffer;
 
-    void SetNativeResolution(void)
-    {
-        uint32_t NativeWidth, NativeHeight;
-
-        switch (eResolution((int)TargetResolution))
-        {
-        default:
-        case k720p:
-            NativeWidth = 1280;
-            NativeHeight = 720;
-            break;
-        case k900p:
-            NativeWidth = 1600;
-            NativeHeight = 900;
-            break;
-        case k1080p:
-            NativeWidth = 1920;
-            NativeHeight = 1080;
-            break;
-        case k1440p:
-            NativeWidth = 2560;
-            NativeHeight = 1440;
-            break;
-        case k1800p:
-            NativeWidth = 3200;
-            NativeHeight = 1800;
-            break;
-        case k2160p:
-            NativeWidth = 3840;
-            NativeHeight = 2160;
-            break;
-        }
-
-        if (mNativeWidth == NativeWidth && mNativeHeight == NativeHeight)
-            return;
-
-        DEBUGPRINT("Changing native resolution to %ux%u", NativeWidth, NativeHeight);
-
-        mNativeWidth = NativeWidth;
-        mNativeHeight = NativeHeight;
-
-        mCommandManager.IdleGPU();
-
-        InitializeRenderingBuffers(NativeWidth, NativeHeight);
-    }
-
-    CommandListManager mCommandManager;
-    ContextManager mContextManager;
+    ID3D12Device* mDevice;
+    //CommandListManager mCommandManager;
+    //ContextManager mContextManager;
 
     D3D_FEATURE_LEVEL mD3DFeatureLevel = D3D_FEATURE_LEVEL_11_0;
 
@@ -222,8 +173,8 @@ struct sloGraphicsCommon
     D3D12_DEPTH_STENCIL_DESC DepthStateReadOnlyReversed;
     D3D12_DEPTH_STENCIL_DESC DepthStateTestEqual;
 
-    CommandSignature DispatchIndirectCommandSignature(1);
-    CommandSignature DrawIndirectCommandSignature(1);
+    CommandSignature DispatchIndirectCommandSignature{1};
+    CommandSignature DrawIndirectCommandSignature{1};
 
 };
 
@@ -240,6 +191,188 @@ struct sloBitonicSort
     ComputePSO s_Bitonic64InnerSortCS;
     ComputePSO s_Bitonic64OuterSortCS;
 
+};
+
+struct sloCommandAllocatorPool
+{
+    const D3D12_COMMAND_LIST_TYPE m_cCommandListType;
+
+    std::vector<ID3D12CommandAllocator*> m_AllocatorPool;
+    std::queue<std::pair<uint64_t, ID3D12CommandAllocator*>> m_ReadyAllocators;
+    std::mutex m_AllocatorMutex;
+
+    inline size_t Size() { return m_AllocatorPool.size(); }
+
+};
+
+struct sloCommandQueue
+{
+    ID3D12CommandQueue* m_CommandQueue;
+
+    const D3D12_COMMAND_LIST_TYPE m_Type;
+
+    sloCommandAllocatorPool m_AllocatorPool;
+    std::mutex m_FenceMutex;
+    std::mutex m_EventMutex;
+
+    // Lifetime of these objects is managed by the descriptor cache
+    ID3D12Fence* m_pFence;
+    uint64_t m_NextFenceValue;
+    uint64_t m_LastCompletedFenceValue;
+    HANDLE m_FenceEventHandle;
+
+    inline bool IsReady()
+    {
+        return m_CommandQueue != nullptr;
+    }
+
+    ID3D12CommandQueue* GetCommandQueue() { return m_CommandQueue; }
+
+    uint64_t GetNextFenceValue() { return m_NextFenceValue; }
+
+    uint64_t IncrementFence(void)
+    {
+        std::lock_guard<std::mutex> LockGuard(m_FenceMutex);
+        m_CommandQueue->Signal(m_pFence, m_NextFenceValue);
+        return m_NextFenceValue++;
+    }
+
+    bool IsFenceComplete(uint64_t FenceValue)
+    {
+        // Avoid querying the fence value by testing against the last one seen.
+        // The max() is to protect against an unlikely race condition that could cause the last
+        // completed fence value to regress.
+        if (FenceValue > m_LastCompletedFenceValue)
+            m_LastCompletedFenceValue = std::max<uint64_t>(m_LastCompletedFenceValue, m_pFence->GetCompletedValue());
+
+        return FenceValue <= m_LastCompletedFenceValue;
+    }
+
+    void WaitForFence(uint64_t FenceValue)
+    {
+        if (IsFenceComplete(FenceValue))
+            return;
+
+        // TODO:  Think about how this might affect a multi-threaded situation.  Suppose thread A
+        // wants to wait for fence 100, then thread B comes along and wants to wait for 99.  If
+        // the fence can only have one event set on completion, then thread B has to wait for 
+        // 100 before it knows 99 is ready.  Maybe insert sequential events?
+        {
+            std::lock_guard<std::mutex> LockGuard(m_EventMutex);
+
+            m_pFence->SetEventOnCompletion(FenceValue, m_FenceEventHandle);
+            WaitForSingleObject(m_FenceEventHandle, INFINITE);
+            m_LastCompletedFenceValue = FenceValue;
+        }
+    }
+
+    void WaitForIdle(void) { WaitForFence(IncrementFence()); }
+
+};
+
+struct sloCommandListManager
+{
+    sloCommandQueue m_GraphicsQueue;
+    sloCommandQueue m_ComputeQueue;
+    sloCommandQueue m_CopyQueue;
+
+    sloCommandQueue& GetGraphicsQueue(void) { return m_GraphicsQueue; }
+    sloCommandQueue& GetComputeQueue(void) { return m_ComputeQueue; }
+    sloCommandQueue& GetCopyQueue(void) { return m_CopyQueue; }
+
+    sloCommandQueue& GetQueue(D3D12_COMMAND_LIST_TYPE Type = D3D12_COMMAND_LIST_TYPE_DIRECT)
+    {
+        switch (Type)
+        {
+        case D3D12_COMMAND_LIST_TYPE_COMPUTE: return m_ComputeQueue;
+        case D3D12_COMMAND_LIST_TYPE_COPY: return m_CopyQueue;
+        default: return m_GraphicsQueue;
+        }
+    }
+
+    ID3D12CommandQueue* GetCommandQueue()
+    {
+        return m_GraphicsQueue.GetCommandQueue();
+    }
+
+};
+
+struct sloGpuTimeManager
+{
+    ID3D12QueryHeap* sm_QueryHeap = nullptr;
+    ID3D12Resource* sm_ReadBackBuffer = nullptr;
+    uint64_t* sm_TimeStampBuffer = nullptr;
+    uint64_t sm_Fence = 0;
+    uint32_t sm_MaxNumTimers = 0;
+    uint32_t sm_NumTimers = 1;
+    uint64_t sm_ValidTimeStart = 0;
+    uint64_t sm_ValidTimeEnd = 0;
+    double sm_GpuTickDelta = 0.0;
+};
+
+struct sloBufferManager
+{
+    DepthBuffer m_SceneDepthBuffer;
+    ColorBuffer m_SceneColorBuffer;
+    ColorBuffer m_PostEffectsBuffer;
+    ColorBuffer m_VelocityBuffer;
+    ColorBuffer m_OverlayBuffer;
+    ColorBuffer m_HorizontalBuffer;
+
+    ShadowBuffer m_ShadowBuffer;
+
+    ColorBuffer m_SSAOFullScreen{ Color(1.0f, 1.0f, 1.0f) };
+    ColorBuffer m_LinearDepth[2];
+    ColorBuffer m_MinMaxDepth8;
+    ColorBuffer m_MinMaxDepth16;
+    ColorBuffer m_MinMaxDepth32;
+    ColorBuffer m_DepthDownsize1;
+    ColorBuffer m_DepthDownsize2;
+    ColorBuffer m_DepthDownsize3;
+    ColorBuffer m_DepthDownsize4;
+    ColorBuffer m_DepthTiled1;
+    ColorBuffer m_DepthTiled2;
+    ColorBuffer m_DepthTiled3;
+    ColorBuffer m_DepthTiled4;
+    ColorBuffer m_AOMerged1;
+    ColorBuffer m_AOMerged2;
+    ColorBuffer m_AOMerged3;
+    ColorBuffer m_AOMerged4;
+    ColorBuffer m_AOSmooth1;
+    ColorBuffer m_AOSmooth2;
+    ColorBuffer m_AOSmooth3;
+    ColorBuffer m_AOHighQuality1;
+    ColorBuffer m_AOHighQuality2;
+    ColorBuffer m_AOHighQuality3;
+    ColorBuffer m_AOHighQuality4;
+
+    ColorBuffer m_DoFTileClass[2];
+    ColorBuffer m_DoFPresortBuffer;
+    ColorBuffer m_DoFPrefilter;
+    ColorBuffer m_DoFBlurColor[2];
+    ColorBuffer m_DoFBlurAlpha[2];
+    StructuredBuffer m_DoFWorkQueue;
+    StructuredBuffer m_DoFFastQueue;
+    StructuredBuffer m_DoFFixupQueue;
+
+    ColorBuffer m_MotionPrepBuffer;
+    ColorBuffer m_LumaBuffer;
+    ColorBuffer m_TemporalColor[2];
+    ColorBuffer m_aBloomUAV1[2];    // 640x384 (1/3)
+    ColorBuffer m_aBloomUAV2[2];    // 320x192 (1/6)  
+    ColorBuffer m_aBloomUAV3[2];    // 160x96  (1/12)
+    ColorBuffer m_aBloomUAV4[2];    // 80x48   (1/24)
+    ColorBuffer m_aBloomUAV5[2];    // 40x24   (1/48)
+    ColorBuffer m_LumaLR;
+    ByteAddressBuffer m_Histogram;
+    ByteAddressBuffer m_FXAAWorkCounters;
+    ByteAddressBuffer m_FXAAWorkQueue;
+    TypedBuffer m_FXAAColorQueue{ DXGI_FORMAT_R11G11B10_FLOAT };
+
+    // For testing GenerateMipMaps()
+    ColorBuffer m_GenMipsBuffer;
+
+    DXGI_FORMAT DefaultHdrColorFormat = DXGI_FORMAT_R11G11B10_FLOAT;
 };
 
 // global variable

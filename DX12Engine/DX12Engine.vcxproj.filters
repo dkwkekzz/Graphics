@@ -3,91 +3,124 @@
   <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="DX12Engine.h" />
-    <ClInclude Include="BlurFilter.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="Camera.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="d3dUtil.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="d3dx12.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="DDSTextureLoader.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="GameTimer.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="GeometryGenerator.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="GlobalVar.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="MathHelper.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="Pures.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="SLO.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="SLP.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="SLP2G.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="string_utils.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="UploadBuffer.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="Waves.h">
-      <Filter>V1</Filter>
-    </ClInclude>
-    <ClInclude Include="World.h">
-      <Filter>V1</Filter>
-    </ClInclude>
     <ClInclude Include="processes.h" />
     <ClInclude Include="objects.h" />
+    <ClInclude Include="Color.h" />
+    <ClInclude Include="ColorBuffer.h" />
+    <ClInclude Include="CommandSignature.h" />
+    <ClInclude Include="EsramAllocator.h" />
+    <ClInclude Include="GpuResource.h" />
+    <ClInclude Include="Hash.h" />
+    <ClInclude Include="PipelineState.h" />
+    <ClInclude Include="PixelBuffer.h" />
+    <ClInclude Include="RootSignature.h" />
+    <ClInclude Include="SamplerDesc.h" />
+    <ClInclude Include="GpuBuffer.h" />
+    <ClInclude Include="GpuTimeManager.h" />
+    <ClInclude Include="DescriptorHeap.h" />
+    <ClInclude Include="V2\BlurFilter.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\Camera.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\d3dUtil.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\DDSTextureLoader.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\GameTimer.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\GeometryGenerator.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\GlobalVar.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\MathHelper.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\Pures.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\SLO.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\SLP.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\SLP2G.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\string_utils.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\UploadBuffer.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\Waves.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="V2\World.h">
+      <Filter>V2</Filter>
+    </ClInclude>
+    <ClInclude Include="CommandAllocatorPool.h" />
+    <ClInclude Include="CommandQueue.h" />
+    <ClInclude Include="CommandListManager.h" />
+    <ClInclude Include="CommandContext.h" />
+    <ClInclude Include="processes2G.h" />
+    <ClInclude Include="DepthBuffer.h" />
+    <ClInclude Include="ShadowBuffer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="DX12Engine.cpp" />
-    <ClCompile Include="BlurFilter.cpp">
-      <Filter>V1</Filter>
+    <ClCompile Include="Color.cpp" />
+    <ClCompile Include="ColorBuffer.cpp" />
+    <ClCompile Include="CommandSignature.cpp" />
+    <ClCompile Include="PipelineState.cpp" />
+    <ClCompile Include="PixelBuffer.cpp" />
+    <ClCompile Include="RootSignature.cpp" />
+    <ClCompile Include="SamplerDesc.cpp" />
+    <ClCompile Include="GpuBuffer.cpp" />
+    <ClCompile Include="GpuTimeManager.cpp" />
+    <ClCompile Include="DescriptorHeap.cpp" />
+    <ClCompile Include="V2\BlurFilter.cpp">
+      <Filter>V2</Filter>
     </ClCompile>
-    <ClCompile Include="Camera.cpp">
-      <Filter>V1</Filter>
+    <ClCompile Include="V2\Camera.cpp">
+      <Filter>V2</Filter>
     </ClCompile>
-    <ClCompile Include="d3dUtil.cpp">
-      <Filter>V1</Filter>
+    <ClCompile Include="V2\d3dUtil.cpp">
+      <Filter>V2</Filter>
     </ClCompile>
-    <ClCompile Include="DDSTextureLoader.cpp">
-      <Filter>V1</Filter>
+    <ClCompile Include="V2\DDSTextureLoader.cpp">
+      <Filter>V2</Filter>
     </ClCompile>
-    <ClCompile Include="GameTimer.cpp">
-      <Filter>V1</Filter>
+    <ClCompile Include="V2\GameTimer.cpp">
+      <Filter>V2</Filter>
     </ClCompile>
-    <ClCompile Include="GeometryGenerator.cpp">
-      <Filter>V1</Filter>
+    <ClCompile Include="V2\GeometryGenerator.cpp">
+      <Filter>V2</Filter>
     </ClCompile>
-    <ClCompile Include="MathHelper.cpp">
-      <Filter>V1</Filter>
+    <ClCompile Include="V2\MathHelper.cpp">
+      <Filter>V2</Filter>
     </ClCompile>
-    <ClCompile Include="Waves.cpp">
-      <Filter>V1</Filter>
+    <ClCompile Include="V2\Waves.cpp">
+      <Filter>V2</Filter>
     </ClCompile>
+    <ClCompile Include="CommandAllocatorPool.cpp" />
+    <ClCompile Include="CommandQueue.cpp" />
+    <ClCompile Include="CommandListManager.cpp" />
+    <ClCompile Include="CommandContext.cpp" />
+    <ClCompile Include="DepthBuffer.cpp" />
+    <ClCompile Include="ShadowBuffer.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <Filter Include="V1">
+    <Filter Include="V2">
       <UniqueIdentifier>{55478194-fb15-4a33-acc2-45d34f054a8e}</UniqueIdentifier>
     </Filter>
   </ItemGroup>

@@ -1,6 +1,6 @@
 #pragma once
 #include "pch.h"
-#include "objects.h"
+#include "processes2G.h"
 
 // This macro determines whether to detect if there is an HDR display and enable HDR10 output.
 // Currently, with HDR display enabled, the pixel magnfication functionality is broken.
@@ -20,107 +20,132 @@
 #endif
 #include <winreg.h>        // To read the registry
 
+#include "../CompiledShaders/ScreenQuadVS.h"
+#include "../CompiledShaders/BufferCopyPS.h"
+#include "../CompiledShaders/PresentSDRPS.h"
+#include "../CompiledShaders/PresentHDRPS.h"
+#include "../CompiledShaders/MagnifyPixelsPS.h"
+#include "../CompiledShaders/BilinearUpsamplePS.h"
+#include "../CompiledShaders/BicubicHorizontalUpsamplePS.h"
+#include "../CompiledShaders/BicubicVerticalUpsamplePS.h"
+#include "../CompiledShaders/SharpeningUpsamplePS.h"
+#include "../CompiledShaders/GenerateMipsLinearCS.h"
+#include "../CompiledShaders/GenerateMipsLinearOddCS.h"
+#include "../CompiledShaders/GenerateMipsLinearOddXCS.h"
+#include "../CompiledShaders/GenerateMipsLinearOddYCS.h"
+#include "../CompiledShaders/GenerateMipsGammaCS.h"
+#include "../CompiledShaders/GenerateMipsGammaOddCS.h"
+#include "../CompiledShaders/GenerateMipsGammaOddXCS.h"
+#include "../CompiledShaders/GenerateMipsGammaOddYCS.h"
+#include "../CompiledShaders/BitonicIndirectArgsCS.h"
+#include "../CompiledShaders/Bitonic32PreSortCS.h"
+#include "../CompiledShaders/Bitonic32InnerSortCS.h"
+#include "../CompiledShaders/Bitonic32OuterSortCS.h"
+#include "../CompiledShaders/Bitonic64PreSortCS.h"
+#include "../CompiledShaders/Bitonic64InnerSortCS.h"
+#include "../CompiledShaders/Bitonic64OuterSortCS.h"
+
 struct slpGraphics
 {
-    static void InitializeCommonState(sloGraphicsCommon* gcn, sloGraphicsCore* gce)
+    static void InitializeCommonState(sloGraphicsCommon* pCommon)
     {
-        gcn->SamplerLinearWrapDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        gcn->SamplerLinearWrap = gcn->SamplerLinearWrapDesc.CreateDescriptor();
+        pCommon->SamplerLinearWrapDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        pCommon->SamplerLinearWrap = pCommon->SamplerLinearWrapDesc.CreateDescriptor();
 
-        gcn->SamplerAnisoWrapDesc.MaxAnisotropy = 4;
-        gcn->SamplerAnisoWrap = gcn->SamplerAnisoWrapDesc.CreateDescriptor();
+        pCommon->SamplerAnisoWrapDesc.MaxAnisotropy = 4;
+        pCommon->SamplerAnisoWrap = pCommon->SamplerAnisoWrapDesc.CreateDescriptor();
 
-        gcn->SamplerShadowDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
-        gcn->SamplerShadowDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
-        gcn->SamplerShadowDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-        gcn->SamplerShadow = gcn->SamplerShadowDesc.CreateDescriptor();
+        pCommon->SamplerShadowDesc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+        pCommon->SamplerShadowDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+        pCommon->SamplerShadowDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+        pCommon->SamplerShadow = pCommon->SamplerShadowDesc.CreateDescriptor();
 
-        gcn->SamplerLinearClampDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        gcn->SamplerLinearClampDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-        gcn->SamplerLinearClamp = gcn->SamplerLinearClampDesc.CreateDescriptor();
+        pCommon->SamplerLinearClampDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        pCommon->SamplerLinearClampDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+        pCommon->SamplerLinearClamp = pCommon->SamplerLinearClampDesc.CreateDescriptor();
 
-        gcn->SamplerVolumeWrapDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-        gcn->SamplerVolumeWrap = gcn->SamplerVolumeWrapDesc.CreateDescriptor();
+        pCommon->SamplerVolumeWrapDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        pCommon->SamplerVolumeWrap = pCommon->SamplerVolumeWrapDesc.CreateDescriptor();
 
-        gcn->SamplerPointClampDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-        gcn->SamplerPointClampDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-        gcn->SamplerPointClamp = gcn->SamplerPointClampDesc.CreateDescriptor();
+        pCommon->SamplerPointClampDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        pCommon->SamplerPointClampDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+        pCommon->SamplerPointClamp = pCommon->SamplerPointClampDesc.CreateDescriptor();
 
-        gcn->SamplerLinearBorderDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        gcn->SamplerLinearBorderDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_BORDER);
-        gcn->SamplerLinearBorderDesc.SetBorderColor(Color(0.0f, 0.0f, 0.0f, 0.0f));
-        gcn->SamplerLinearBorder = gcn->SamplerLinearBorderDesc.CreateDescriptor();
+        pCommon->SamplerLinearBorderDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        pCommon->SamplerLinearBorderDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_BORDER);
+        pCommon->SamplerLinearBorderDesc.SetBorderColor(Color(0.0f, 0.0f, 0.0f, 0.0f));
+        pCommon->SamplerLinearBorder = pCommon->SamplerLinearBorderDesc.CreateDescriptor();
 
-        gcn->SamplerPointBorderDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-        gcn->SamplerPointBorderDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_BORDER);
-        gcn->SamplerPointBorderDesc.SetBorderColor(Color(0.0f, 0.0f, 0.0f, 0.0f));
-        gcn->SamplerPointBorder = gcn->SamplerPointBorderDesc.CreateDescriptor();
+        pCommon->SamplerPointBorderDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        pCommon->SamplerPointBorderDesc.SetTextureAddressMode(D3D12_TEXTURE_ADDRESS_MODE_BORDER);
+        pCommon->SamplerPointBorderDesc.SetBorderColor(Color(0.0f, 0.0f, 0.0f, 0.0f));
+        pCommon->SamplerPointBorder = pCommon->SamplerPointBorderDesc.CreateDescriptor();
 
         // Default rasterizer states
-        gcn->RasterizerDefault.FillMode = D3D12_FILL_MODE_SOLID;
-        gcn->RasterizerDefault.CullMode = D3D12_CULL_MODE_BACK;
-        gcn->RasterizerDefault.FrontCounterClockwise = TRUE;
-        gcn->RasterizerDefault.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-        gcn->RasterizerDefault.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-        gcn->RasterizerDefault.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-        gcn->RasterizerDefault.DepthClipEnable = TRUE;
-        gcn->RasterizerDefault.MultisampleEnable = FALSE;
-        gcn->RasterizerDefault.AntialiasedLineEnable = FALSE;
-        gcn->RasterizerDefault.ForcedSampleCount = 0;
-        gcn->RasterizerDefault.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+        pCommon->RasterizerDefault.FillMode = D3D12_FILL_MODE_SOLID;
+        pCommon->RasterizerDefault.CullMode = D3D12_CULL_MODE_BACK;
+        pCommon->RasterizerDefault.FrontCounterClockwise = TRUE;
+        pCommon->RasterizerDefault.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+        pCommon->RasterizerDefault.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+        pCommon->RasterizerDefault.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+        pCommon->RasterizerDefault.DepthClipEnable = TRUE;
+        pCommon->RasterizerDefault.MultisampleEnable = FALSE;
+        pCommon->RasterizerDefault.AntialiasedLineEnable = FALSE;
+        pCommon->RasterizerDefault.ForcedSampleCount = 0;
+        pCommon->RasterizerDefault.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
-        gcn->RasterizerDefaultMsaa = gcn->RasterizerDefault;
-        gcn->RasterizerDefaultMsaa.MultisampleEnable = TRUE;
+        pCommon->RasterizerDefaultMsaa = pCommon->RasterizerDefault;
+        pCommon->RasterizerDefaultMsaa.MultisampleEnable = TRUE;
 
-        gcn->RasterizerDefaultCw = gcn->RasterizerDefault;
-        gcn->RasterizerDefaultCw.FrontCounterClockwise = FALSE;
+        pCommon->RasterizerDefaultCw = pCommon->RasterizerDefault;
+        pCommon->RasterizerDefaultCw.FrontCounterClockwise = FALSE;
 
-        gcn->RasterizerDefaultCwMsaa = gcn->RasterizerDefaultCw;
-        gcn->RasterizerDefaultCwMsaa.MultisampleEnable = TRUE;
+        pCommon->RasterizerDefaultCwMsaa = pCommon->RasterizerDefaultCw;
+        pCommon->RasterizerDefaultCwMsaa.MultisampleEnable = TRUE;
 
-        gcn->RasterizerTwoSided = gcn->RasterizerDefault;
-        gcn->RasterizerTwoSided.CullMode = D3D12_CULL_MODE_NONE;
+        pCommon->RasterizerTwoSided = pCommon->RasterizerDefault;
+        pCommon->RasterizerTwoSided.CullMode = D3D12_CULL_MODE_NONE;
 
-        gcn->RasterizerTwoSidedMsaa = gcn->RasterizerTwoSided;
-        gcn->RasterizerTwoSidedMsaa.MultisampleEnable = TRUE;
+        pCommon->RasterizerTwoSidedMsaa = pCommon->RasterizerTwoSided;
+        pCommon->RasterizerTwoSidedMsaa.MultisampleEnable = TRUE;
 
         // Shadows need their own rasterizer state so we can reverse the winding of faces
-        gcn->RasterizerShadow = gcn->RasterizerDefault;
+        pCommon->RasterizerShadow = pCommon->RasterizerDefault;
         //RasterizerShadow.CullMode = D3D12_CULL_FRONT;  // Hacked here rather than fixing the content
-        gcn->RasterizerShadow.SlopeScaledDepthBias = -1.5f;
-        gcn->RasterizerShadow.DepthBias = -100;
+        pCommon->RasterizerShadow.SlopeScaledDepthBias = -1.5f;
+        pCommon->RasterizerShadow.DepthBias = -100;
 
-        gcn->RasterizerShadowTwoSided = gcn->RasterizerShadow;
-        gcn->RasterizerShadowTwoSided.CullMode = D3D12_CULL_MODE_NONE;
+        pCommon->RasterizerShadowTwoSided = pCommon->RasterizerShadow;
+        pCommon->RasterizerShadowTwoSided.CullMode = D3D12_CULL_MODE_NONE;
 
-        gcn->RasterizerShadowCW = gcn->RasterizerShadow;
-        gcn->RasterizerShadowCW.FrontCounterClockwise = FALSE;
+        pCommon->RasterizerShadowCW = pCommon->RasterizerShadow;
+        pCommon->RasterizerShadowCW.FrontCounterClockwise = FALSE;
 
-        gcn->DepthStateDisabled.DepthEnable = FALSE;
-        gcn->DepthStateDisabled.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-        gcn->DepthStateDisabled.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-        gcn->DepthStateDisabled.StencilEnable = FALSE;
-        gcn->DepthStateDisabled.StencilReadMask = D3D12_DEFAULT_STENCIL_READ_MASK;
-        gcn->DepthStateDisabled.StencilWriteMask = D3D12_DEFAULT_STENCIL_WRITE_MASK;
-        gcn->DepthStateDisabled.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-        gcn->DepthStateDisabled.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
-        gcn->DepthStateDisabled.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-        gcn->DepthStateDisabled.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-        gcn->DepthStateDisabled.BackFace = gcn->DepthStateDisabled.FrontFace;
+        pCommon->DepthStateDisabled.DepthEnable = FALSE;
+        pCommon->DepthStateDisabled.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        pCommon->DepthStateDisabled.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        pCommon->DepthStateDisabled.StencilEnable = FALSE;
+        pCommon->DepthStateDisabled.StencilReadMask = D3D12_DEFAULT_STENCIL_READ_MASK;
+        pCommon->DepthStateDisabled.StencilWriteMask = D3D12_DEFAULT_STENCIL_WRITE_MASK;
+        pCommon->DepthStateDisabled.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        pCommon->DepthStateDisabled.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
+        pCommon->DepthStateDisabled.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
+        pCommon->DepthStateDisabled.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+        pCommon->DepthStateDisabled.BackFace = pCommon->DepthStateDisabled.FrontFace;
 
-        gcn->DepthStateReadWrite = gcn->DepthStateDisabled;
-        gcn->DepthStateReadWrite.DepthEnable = TRUE;
-        gcn->DepthStateReadWrite.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-        gcn->DepthStateReadWrite.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+        pCommon->DepthStateReadWrite = pCommon->DepthStateDisabled;
+        pCommon->DepthStateReadWrite.DepthEnable = TRUE;
+        pCommon->DepthStateReadWrite.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+        pCommon->DepthStateReadWrite.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
 
-        gcn->DepthStateReadOnly = gcn->DepthStateReadWrite;
-        gcn->DepthStateReadOnly.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+        pCommon->DepthStateReadOnly = pCommon->DepthStateReadWrite;
+        pCommon->DepthStateReadOnly.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
 
-        gcn->DepthStateReadOnlyReversed = gcn->DepthStateReadOnly;
-        gcn->DepthStateReadOnlyReversed.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+        pCommon->DepthStateReadOnlyReversed = pCommon->DepthStateReadOnly;
+        pCommon->DepthStateReadOnlyReversed.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
 
-        gcn->DepthStateTestEqual = gcn->DepthStateReadOnly;
-        gcn->DepthStateTestEqual.DepthFunc = D3D12_COMPARISON_FUNC_EQUAL;
+        pCommon->DepthStateTestEqual = pCommon->DepthStateReadOnly;
+        pCommon->DepthStateTestEqual.DepthFunc = D3D12_COMPARISON_FUNC_EQUAL;
 
         D3D12_BLEND_DESC alphaBlend = {};
         alphaBlend.IndependentBlendEnable = FALSE;
@@ -132,75 +157,76 @@ struct slpGraphics
         alphaBlend.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
         alphaBlend.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
         alphaBlend.RenderTarget[0].RenderTargetWriteMask = 0;
-        gcn->BlendNoColorWrite = alphaBlend;
+        pCommon->BlendNoColorWrite = alphaBlend;
 
         alphaBlend.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-        gcn->BlendDisable = alphaBlend;
+        pCommon->BlendDisable = alphaBlend;
 
         alphaBlend.RenderTarget[0].BlendEnable = TRUE;
-        gcn->BlendTraditional = alphaBlend;
+        pCommon->BlendTraditional = alphaBlend;
 
         alphaBlend.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
-        gcn->BlendPreMultiplied = alphaBlend;
+        pCommon->BlendPreMultiplied = alphaBlend;
 
         alphaBlend.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
-        gcn->BlendAdditive = alphaBlend;
+        pCommon->BlendAdditive = alphaBlend;
 
         alphaBlend.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-        gcn->BlendTraditionalAdditive = alphaBlend;
+        pCommon->BlendTraditionalAdditive = alphaBlend;
 
-        gcn->DispatchIndirectCommandSignature[0].Dispatch();
-        gcn->DispatchIndirectCommandSignature.Finalize();
+        pCommon->DispatchIndirectCommandSignature[0].Dispatch();
+        pCommon->DispatchIndirectCommandSignature.Finalize();
 
-        gcn->DrawIndirectCommandSignature[0].Draw();
-        gcn->DrawIndirectCommandSignature.Finalize();
+        pCommon->DrawIndirectCommandSignature[0].Draw();
+        pCommon->DrawIndirectCommandSignature.Finalize();
 
         //BitonicSort::Initialize();
     }
 
-    static void InitializeBitonicSort()
+    static void InitializeBitonicSort(sloBitonicSort* pBitonicSort)
     {
-        s_DispatchArgs.Create(L"Bitonic sort dispatch args", 22 * 23 / 2, 12);
+        pBitonicSort->s_DispatchArgs.Create(L"Bitonic sort dispatch args", 22 * 23 / 2, 12);
 
-        s_RootSignature.Reset(4, 0);
-        s_RootSignature[0].InitAsConstants(0, 2);
-        s_RootSignature[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 1);
-        s_RootSignature[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
-        s_RootSignature[3].InitAsConstants(1, 2);
-        s_RootSignature.Finalize(L"Bitonic Sort");
+        pBitonicSort->s_RootSignature.Reset(4, 0);
+        pBitonicSort->s_RootSignature[0].InitAsConstants(0, 2);
+        pBitonicSort->s_RootSignature[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 1);
+        pBitonicSort->s_RootSignature[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
+        pBitonicSort->s_RootSignature[3].InitAsConstants(1, 2);
+        pBitonicSort->s_RootSignature.Finalize(L"Bitonic Sort");
 
 #define CreatePSO( ObjName, ShaderByteCode ) \
-    ObjName.SetRootSignature(s_RootSignature); \
+    ObjName.SetRootSignature(pBitonicSort->s_RootSignature); \
     ObjName.SetComputeShader(ShaderByteCode, sizeof(ShaderByteCode) ); \
     ObjName.Finalize();
 
-        CreatePSO(s_BitonicIndirectArgsCS, g_pBitonicIndirectArgsCS);
-        CreatePSO(s_Bitonic32PreSortCS, g_pBitonic32PreSortCS);
-        CreatePSO(s_Bitonic32InnerSortCS, g_pBitonic32InnerSortCS);
-        CreatePSO(s_Bitonic32OuterSortCS, g_pBitonic32OuterSortCS);
-        CreatePSO(s_Bitonic64PreSortCS, g_pBitonic64PreSortCS);
-        CreatePSO(s_Bitonic64InnerSortCS, g_pBitonic64InnerSortCS);
-        CreatePSO(s_Bitonic64OuterSortCS, g_pBitonic64OuterSortCS);
+        CreatePSO(pBitonicSort->s_BitonicIndirectArgsCS, g_pBitonicIndirectArgsCS);
+        CreatePSO(pBitonicSort->s_Bitonic32PreSortCS, g_pBitonic32PreSortCS);
+        CreatePSO(pBitonicSort->s_Bitonic32InnerSortCS, g_pBitonic32InnerSortCS);
+        CreatePSO(pBitonicSort->s_Bitonic32OuterSortCS, g_pBitonic32OuterSortCS);
+        CreatePSO(pBitonicSort->s_Bitonic64PreSortCS, g_pBitonic64PreSortCS);
+        CreatePSO(pBitonicSort->s_Bitonic64InnerSortCS, g_pBitonic64InnerSortCS);
+        CreatePSO(pBitonicSort->s_Bitonic64OuterSortCS, g_pBitonic64OuterSortCS);
 
 #undef CreatePSO
     }
 
-    static void DestroyCommonState(void)
-    {
-        DispatchIndirectCommandSignature.Destroy();
-        DrawIndirectCommandSignature.Destroy();
+    //static void DestroyCommonState(void)
+    //{
+    //    DispatchIndirectCommandSignature.Destroy();
+    //    DrawIndirectCommandSignature.Destroy();
+    //
+    //    BitonicSort::Shutdown();
+    //}
+    //
+    //static void DestroyBitonicSort(void)
+    //{
+    //    s_DispatchArgs.Destroy();
+    //}
 
-        BitonicSort::Shutdown();
-    }
-
-    static void DestroyBitonicSort(void)
-    {
-        s_DispatchArgs.Destroy();
-    }
-
-	static void Initialize(sloGraphicsCore* gce, sloFrameCounter* fc, sloGraphicsCommon* gcn, HWND mhWnd)
+	static void Initialize(sloGraphicsCore* pCore, sloFrameCounter* pFrameCounter, sloGraphicsCommon* pCommon, 
+        sloCommandListManager* pCmdMgr, sloBitonicSort* pBitonicSort, HWND mhWnd)
 	{
-        ASSERT(gce->mSwapChain1 == nullptr, "Graphics has already been initialized");
+        ASSERT(pCore->mSwapChain1 == nullptr, "Graphics has already been initialized");
 
         Microsoft::WRL::ComPtr<ID3D12Device> pDevice;
 
@@ -243,10 +269,10 @@ struct slpGraphics
             }
 
             if (MaxSize > 0)
-                gce->mDevice = pDevice.Detach();
+                pCore->mDevice = pDevice.Detach();
         }
 
-        if (gce->mDevice == nullptr)
+        if (pCore->mDevice == nullptr)
         {
             if (bUseWarpDriver)
                 Utility::Print("WARP software adapter requested.  Initializing...\n");
@@ -254,7 +280,7 @@ struct slpGraphics
                 Utility::Print("Failed to find a hardware adapter.  Falling back to WARP.\n");
             ASSERT_SUCCEEDED(dxgiFactory->EnumWarpAdapter(IID_PPV_ARGS(&pAdapter)));
             ASSERT_SUCCEEDED(D3D12CreateDevice(pAdapter.Get(), D3D_FEATURE_LEVEL_11_0, MY_IID_PPV_ARGS(&pDevice)));
-            gce->mDevice = pDevice.Detach();
+            pCore->mDevice = pDevice.Detach();
         }
 #ifndef RELEASE
         else
@@ -277,13 +303,13 @@ struct slpGraphics
 
             // Prevent the GPU from overclocking or underclocking to get consistent timings
             if (DeveloperModeEnabled)
-                gce->mDevice->SetStablePowerState(TRUE);
+                pCore->mDevice->SetStablePowerState(TRUE);
         }
 #endif    
 
 #if _DEBUG
         ID3D12InfoQueue* pInfoQueue = nullptr;
-        if (SUCCEEDED(gce->mDevice->QueryInterface(MY_IID_PPV_ARGS(&pInfoQueue))))
+        if (SUCCEEDED(pCore->mDevice->QueryInterface(MY_IID_PPV_ARGS(&pInfoQueue))))
         {
             // Suppress whole categories of messages
             //D3D12_MESSAGE_CATEGORY Categories[] = {};
@@ -333,7 +359,7 @@ struct slpGraphics
         // decode an R32_UINT representation of the same buffer.  This code determines if we get the hardware
         // load support.
         D3D12_FEATURE_DATA_D3D12_OPTIONS FeatureData = {};
-        if (SUCCEEDED(gce->mDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &FeatureData, sizeof(FeatureData))))
+        if (SUCCEEDED(pCore->mDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &FeatureData, sizeof(FeatureData))))
         {
             if (FeatureData.TypedUAVLoadAdditionalFormats)
             {
@@ -342,27 +368,27 @@ struct slpGraphics
                     DXGI_FORMAT_R11G11B10_FLOAT, D3D12_FORMAT_SUPPORT1_NONE, D3D12_FORMAT_SUPPORT2_NONE
                 };
 
-                if (SUCCEEDED(gce->mDevice->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &Support, sizeof(Support))) &&
+                if (SUCCEEDED(pCore->mDevice->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &Support, sizeof(Support))) &&
                     (Support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_LOAD) != 0)
                 {
-                    gce->mbTypedUAVLoadSupport_R11G11B10_FLOAT = true;
+                    pCore->mbTypedUAVLoadSupport_R11G11B10_FLOAT = true;
                 }
 
                 Support.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
-                if (SUCCEEDED(gce->mDevice->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &Support, sizeof(Support))) &&
+                if (SUCCEEDED(pCore->mDevice->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &Support, sizeof(Support))) &&
                     (Support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_LOAD) != 0)
                 {
-                    gce->mbTypedUAVLoadSupport_R16G16B16A16_FLOAT = true;
+                    pCore->mbTypedUAVLoadSupport_R16G16B16A16_FLOAT = true;
                 }
             }
         }
 
-        gce->mCommandManager.Create(gce->mDevice);
+        slpCommandManagement::CreateCommandListManager(pCore, pCmdMgr);
 
         DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-        swapChainDesc.Width = gce->mDisplayWidth;
-        swapChainDesc.Height = gce->mDisplayHeight;
+        swapChainDesc.Width = pCore->mDisplayWidth;
+        swapChainDesc.Height = pCore->mDisplayHeight;
         swapChainDesc.Format = SWAP_CHAIN_FORMAT;
         swapChainDesc.Scaling = DXGI_SCALING_NONE;
         swapChainDesc.SampleDesc.Quality = 0;
@@ -373,14 +399,14 @@ struct slpGraphics
         swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
 
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) // Win32
-        ASSERT_SUCCEEDED(dxgiFactory->CreateSwapChainForHwnd(gce->mCommandManager.GetCommandQueue(), mhWnd, &swapChainDesc, nullptr, nullptr, &gce->mSwapChain1));
+        ASSERT_SUCCEEDED(dxgiFactory->CreateSwapChainForHwnd(pCmdMgr->GetCommandQueue(), mhWnd, &swapChainDesc, nullptr, nullptr, &pCore->mSwapChain1));
 #else // UWP
-        ASSERT_SUCCEEDED(dxgiFactory->CreateSwapChainForCoreWindow(gce->mCommandManager.GetCommandQueue(), (IUnknown*)GameCore::gce->mwindow.Get(), &swapChainDesc, nullptr, &gce->mSwapChain1));
+        ASSERT_SUCCEEDED(dxgiFactory->CreateSwapChainForCoreWindow(pCmdMgr->GetCommandQueue(), (IUnknown*)GameCore::pCore->mwindow.Get(), &swapChainDesc, nullptr, &pCore->mSwapChain1));
 #endif
 
 #if CONDITIONALLY_ENABLE_HDR_OUTPUT && defined(NTDDI_WIN10_RS2) && (NTDDI_VERSION >= NTDDI_WIN10_RS2)
         {
-            IDXGISwapChain4* swapChain = (IDXGISwapChain4*)gce->mSwapChain1;
+            IDXGISwapChain4* swapChain = (IDXGISwapChain4*)pCore->mSwapChain1;
             ComPtr<IDXGIOutput> output;
             ComPtr<IDXGIOutput6> output6;
             DXGI_OUTPUT_DESC1 outputDesc;
@@ -395,7 +421,7 @@ struct slpGraphics
                 (colorSpaceSupport & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) &&
                 SUCCEEDED(swapChain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)))
             {
-                gce->mbEnableHDROutput = true;
+                pCore->mbEnableHDROutput = true;
             }
         }
 #endif
@@ -403,96 +429,22 @@ struct slpGraphics
         for (uint32_t i = 0; i < SWAP_CHAIN_BUFFER_COUNT; ++i)
         {
             ComPtr<ID3D12Resource> DisplayPlane;
-            ASSERT_SUCCEEDED(gce->mSwapChain1->GetBuffer(i, MY_IID_PPV_ARGS(&DisplayPlane)));
-            gce->mDisplayPlane[i].CreateFromSwapChain(L"Primary SwapChain Buffer", DisplayPlane.Detach());
+            ASSERT_SUCCEEDED(pCore->mSwapChain1->GetBuffer(i, MY_IID_PPV_ARGS(&DisplayPlane)));
+            pCore->mDisplayPlane[i].CreateFromSwapChain(L"Primary SwapChain Buffer", DisplayPlane.Detach());
         }
 
         // Common state was moved to GraphicsCommon.*
-        InitializeCommonState(gcn, gce);
+        InitializeCommonState(pCommon);
 
-        InitializeRootSignature();
+        InitializeBitonicSort(pBitonicSort);
 
-        InitializePSOs();
-	}
+        InitializeRootSignature(pCore, pCommon);
 
-    static void InitializeRootSignature(sloGraphicsCore* gce, sloGraphicsCommon* gcn)
-    {
-        gce->mPresentRS.Reset(4, 2);
-        gce->mPresentRS[0].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2);
-        gce->mPresentRS[1].InitAsConstants(0, 6, D3D12_SHADER_VISIBILITY_ALL);
-        gce->mPresentRS[2].InitAsBufferSRV(2, D3D12_SHADER_VISIBILITY_PIXEL);
-        gce->mPresentRS[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
-        gce->mPresentRS.InitStaticSampler(0, gcn->SamplerLinearClampDesc);
-        gce->mPresentRS.InitStaticSampler(1, gcn->SamplerPointClampDesc);
-        gce->mPresentRS.Finalize(L"Present");
-    }
+        InitializePSOs(pCore, pCommon);
 
-    static void InitializePSOs(sloGraphicsCore* gce, sloGraphicsCommon* gcn)
-    {
-        // Initialize PSOs
-        gce->mBlendUIPSO.SetRootSignature(gce->mPresentRS);
-        gce->mBlendUIPSO.SetRasterizerState(gcn->RasterizerTwoSided);
-        gce->mBlendUIPSO.SetBlendState(gcn->BlendPreMultiplied);
-        gce->mBlendUIPSO.SetDepthStencilState(gcn->DepthStateDisabled);
-        gce->mBlendUIPSO.SetSampleMask(0xFFFFFFFF);
-        gce->mBlendUIPSO.SetInputLayout(0, nullptr);
-        gce->mBlendUIPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
-        gce->mBlendUIPSO.SetVertexShader(gce->mpScreenQuadVS, sizeof(gce->mpScreenQuadVS));
-        gce->mBlendUIPSO.SetPixelShader(gce->mpBufferCopyPS, sizeof(gce->mpBufferCopyPS));
-        gce->mBlendUIPSO.SetRenderTargetFormat(SWAP_CHAIN_FORMAT, DXGI_FORMAT_UNKNOWN);
-        gce->mBlendUIPSO.Finalize();
+        //GpuTimeManager::Initialize(4096);
+        InitializeGpuTimeManager(4096);
 
-#define CreatePSO( ObjName, ShaderByteCode ) \
-        ObjName = gce->mBlendUIPSO; \
-        ObjName.SetBlendState( BlendDisable ); \
-        ObjName.SetPixelShader(ShaderByteCode, sizeof(ShaderByteCode) ); \
-        ObjName.Finalize();
-
-        CreatePSO(gce->PresentSDRPS, gce->mpPresentSDRPS);
-        CreatePSO(gce->MagnifyPixelsPS, gce->mpMagnifyPixelsPS);
-        CreatePSO(gce->BilinearUpsamplePS, gce->mpBilinearUpsamplePS);
-        CreatePSO(gce->BicubicHorizontalUpsamplePS, gce->mpBicubicHorizontalUpsamplePS);
-        CreatePSO(gce->BicubicVerticalUpsamplePS, gce->mpBicubicVerticalUpsamplePS);
-        CreatePSO(gce->SharpeningUpsamplePS, gce->mpSharpeningUpsamplePS);
-
-#undef CreatePSO
-
-        gce->BicubicHorizontalUpsamplePS = gce->mBlendUIPSO;
-        gce->BicubicHorizontalUpsamplePS.SetBlendState(BlendDisable);
-        gce->BicubicHorizontalUpsamplePS.SetPixelShader(gcn->mpBicubicHorizontalUpsamplePS, sizeof(gce->mpBicubicHorizontalUpsamplePS));
-        gce->BicubicHorizontalUpsamplePS.SetRenderTargetFormat(DXGI_FORMAT_R11G11B10_FLOAT, DXGI_FORMAT_UNKNOWN);
-        gce->BicubicHorizontalUpsamplePS.Finalize();
-
-        gce->PresentHDRPS = PresentSDRPS;
-        gce->PresentHDRPS.SetPixelShader(gce->mpPresentHDRPS, sizeof(gce->mpPresentHDRPS));
-        DXGI_FORMAT SWAP_CHAIN_FORMATs[2] = { DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM };
-        gce->PresentHDRPS.SetRenderTargetFormats(2, SWAP_CHAIN_FORMATs, DXGI_FORMAT_UNKNOWN);
-        gce->PresentHDRPS.Finalize();
-
-        gce->mGenerateMipsRS.Reset(3, 1);
-        gce->mGenerateMipsRS[0].InitAsConstants(0, 4);
-        gce->mGenerateMipsRS[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 1);
-        gce->mGenerateMipsRS[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 4);
-        gce->mGenerateMipsRS.InitStaticSampler(0, SamplerLinearClampDesc);
-        gce->mGenerateMipsRS.Finalize(L"Generate Mips");
-
-#define CreatePSO(ObjName, ShaderByteCode ) \
-        ObjName.SetRootSignature(gce->mGenerateMipsRS); \
-        ObjName.SetComputeShader(ShaderByteCode, sizeof(ShaderByteCode) ); \
-        ObjName.Finalize();
-
-        CreatePSO(gce->mGenerateMipsLinearPSO[0], gce->mpGenerateMipsLinearCS);
-        CreatePSO(gce->mGenerateMipsLinearPSO[1], gce->mpGenerateMipsLinearOddXCS);
-        CreatePSO(gce->mGenerateMipsLinearPSO[2], gce->mpGenerateMipsLinearOddYCS);
-        CreatePSO(gce->mGenerateMipsLinearPSO[3], gce->mpGenerateMipsLinearOddCS);
-        CreatePSO(gce->mGenerateMipsGammaPSO[0], gce->mpGenerateMipsGammaCS);
-        CreatePSO(gce->mGenerateMipsGammaPSO[1], gce->mpGenerateMipsGammaOddXCS);
-        CreatePSO(gce->mGenerateMipsGammaPSO[2], gce->mpGenerateMipsGammaOddYCS);
-        CreatePSO(gce->mGenerateMipsGammaPSO[3], gce->mpGenerateMipsGammaOddCS);
-
-        gce->mPreDisplayBuffer.Create(L"PreDisplay Buffer", gce->mDisplayWidth, gce->mDisplayHeight, 1, SWAP_CHAIN_FORMAT);
-
-        GpuTimeManager::Initialize(4096);
         SetNativeResolution();
         TemporalEffects::Initialize();
         PostEffects::Initialize();
@@ -500,5 +452,314 @@ struct slpGraphics
         TextRenderer::Initialize();
         GraphRenderer::Initialize();
         ParticleEffects::Initialize(kMaxNativeWidth, kMaxNativeHeight);
+	}
+
+    static void InitializeRootSignature(sloGraphicsCore* pCore, sloGraphicsCommon* pCommon)
+    {
+        pCore->mPresentRS.Reset(4, 2);
+        pCore->mPresentRS[0].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 2);
+        pCore->mPresentRS[1].InitAsConstants(0, 6, D3D12_SHADER_VISIBILITY_ALL);
+        pCore->mPresentRS[2].InitAsBufferSRV(2, D3D12_SHADER_VISIBILITY_PIXEL);
+        pCore->mPresentRS[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 1);
+        pCore->mPresentRS.InitStaticSampler(0, pCommon->SamplerLinearClampDesc);
+        pCore->mPresentRS.InitStaticSampler(1, pCommon->SamplerPointClampDesc);
+        pCore->mPresentRS.Finalize(L"Present");
     }
+
+    static void InitializePSOs(sloGraphicsCore* pCore, sloGraphicsCommon* pCommon)
+    {
+        // Initialize PSOs
+        pCore->mBlendUIPSO.SetRootSignature(pCore->mPresentRS);
+        pCore->mBlendUIPSO.SetRasterizerState(pCommon->RasterizerTwoSided);
+        pCore->mBlendUIPSO.SetBlendState(pCommon->BlendPreMultiplied);
+        pCore->mBlendUIPSO.SetDepthStencilState(pCommon->DepthStateDisabled);
+        pCore->mBlendUIPSO.SetSampleMask(0xFFFFFFFF);
+        pCore->mBlendUIPSO.SetInputLayout(0, nullptr);
+        pCore->mBlendUIPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
+        pCore->mBlendUIPSO.SetVertexShader(g_pScreenQuadVS, sizeof(g_pScreenQuadVS));
+        pCore->mBlendUIPSO.SetPixelShader(g_pBufferCopyPS, sizeof(g_pBufferCopyPS));
+        pCore->mBlendUIPSO.SetRenderTargetFormat(SWAP_CHAIN_FORMAT, DXGI_FORMAT_UNKNOWN);
+        pCore->mBlendUIPSO.Finalize();
+
+#define CreatePSO( ObjName, ShaderByteCode ) \
+        ObjName = pCore->mBlendUIPSO; \
+        ObjName.SetBlendState( pCommon->BlendDisable ); \
+        ObjName.SetPixelShader(ShaderByteCode, sizeof(ShaderByteCode) ); \
+        ObjName.Finalize();
+
+        CreatePSO(pCore->PresentSDRPS, g_pPresentSDRPS);
+        CreatePSO(pCore->MagnifyPixelsPS, g_pMagnifyPixelsPS);
+        CreatePSO(pCore->BilinearUpsamplePS, g_pBilinearUpsamplePS);
+        CreatePSO(pCore->BicubicHorizontalUpsamplePS, g_pBicubicHorizontalUpsamplePS);
+        CreatePSO(pCore->BicubicVerticalUpsamplePS, g_pBicubicVerticalUpsamplePS);
+        CreatePSO(pCore->SharpeningUpsamplePS, g_pSharpeningUpsamplePS);
+
+#undef CreatePSO
+
+        pCore->BicubicHorizontalUpsamplePS = pCore->mBlendUIPSO;
+        pCore->BicubicHorizontalUpsamplePS.SetBlendState(pCommon->BlendDisable);
+        pCore->BicubicHorizontalUpsamplePS.SetPixelShader(g_pBicubicHorizontalUpsamplePS, sizeof(g_pBicubicHorizontalUpsamplePS));
+        pCore->BicubicHorizontalUpsamplePS.SetRenderTargetFormat(DXGI_FORMAT_R11G11B10_FLOAT, DXGI_FORMAT_UNKNOWN);
+        pCore->BicubicHorizontalUpsamplePS.Finalize();
+
+        pCore->PresentHDRPS = pCore->PresentSDRPS;
+        pCore->PresentHDRPS.SetPixelShader(g_pPresentHDRPS, sizeof(g_pPresentHDRPS));
+        DXGI_FORMAT SWAP_CHAIN_FORMATs[2] = { DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM };
+        pCore->PresentHDRPS.SetRenderTargetFormats(2, SWAP_CHAIN_FORMATs, DXGI_FORMAT_UNKNOWN);
+        pCore->PresentHDRPS.Finalize();
+
+        pCore->mGenerateMipsRS.Reset(3, 1);
+        pCore->mGenerateMipsRS[0].InitAsConstants(0, 4);
+        pCore->mGenerateMipsRS[1].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 1);
+        pCore->mGenerateMipsRS[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0, 4);
+        pCore->mGenerateMipsRS.InitStaticSampler(0, pCommon->SamplerLinearClampDesc);
+        pCore->mGenerateMipsRS.Finalize(L"Generate Mips");
+
+#define CreatePSO(ObjName, ShaderByteCode ) \
+        ObjName.SetRootSignature(pCore->mGenerateMipsRS); \
+        ObjName.SetComputeShader(ShaderByteCode, sizeof(ShaderByteCode) ); \
+        ObjName.Finalize();
+
+        CreatePSO(pCore->mGenerateMipsLinearPSO[0], g_pGenerateMipsLinearCS);
+        CreatePSO(pCore->mGenerateMipsLinearPSO[1], g_pGenerateMipsLinearOddXCS);
+        CreatePSO(pCore->mGenerateMipsLinearPSO[2], g_pGenerateMipsLinearOddYCS);
+        CreatePSO(pCore->mGenerateMipsLinearPSO[3], g_pGenerateMipsLinearOddCS);
+        CreatePSO(pCore->mGenerateMipsGammaPSO[0], g_pGenerateMipsGammaCS);
+        CreatePSO(pCore->mGenerateMipsGammaPSO[1], g_pGenerateMipsGammaOddXCS);
+        CreatePSO(pCore->mGenerateMipsGammaPSO[2], g_pGenerateMipsGammaOddYCS);
+        CreatePSO(pCore->mGenerateMipsGammaPSO[3], g_pGenerateMipsGammaOddCS);
+
+        pCore->mPreDisplayBuffer.Create(L"PreDisplay Buffer", pCore->mDisplayWidth, pCore->mDisplayHeight, 1, SWAP_CHAIN_FORMAT);
+    }
+
+    static void InitializeGpuTimeManager(sloGraphicsCore* pCore, sloCommandListManager* pCmdMgr, sloGpuTimeManager* pGpuTimeManager,
+        uint32_t MaxNumTimers)
+    {
+        uint64_t GpuFrequency;
+        pCmdMgr->GetCommandQueue()->GetTimestampFrequency(&GpuFrequency);
+        pGpuTimeManager->sm_GpuTickDelta = 1.0 / static_cast<double>(GpuFrequency);
+
+        D3D12_HEAP_PROPERTIES HeapProps;
+        HeapProps.Type = D3D12_HEAP_TYPE_READBACK;
+        HeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+        HeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+        HeapProps.CreationNodeMask = 1;
+        HeapProps.VisibleNodeMask = 1;
+
+        D3D12_RESOURCE_DESC BufferDesc;
+        BufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        BufferDesc.Alignment = 0;
+        BufferDesc.Width = sizeof(uint64_t) * MaxNumTimers * 2;
+        BufferDesc.Height = 1;
+        BufferDesc.DepthOrArraySize = 1;
+        BufferDesc.MipLevels = 1;
+        BufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+        BufferDesc.SampleDesc.Count = 1;
+        BufferDesc.SampleDesc.Quality = 0;
+        BufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        BufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        ASSERT_SUCCEEDED(pCore->mDevice->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE, &BufferDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr, MY_IID_PPV_ARGS(&pGpuTimeManager->sm_ReadBackBuffer)));
+        pGpuTimeManager->sm_ReadBackBuffer->SetName(L"GpuTimeStamp Buffer");
+
+        D3D12_QUERY_HEAP_DESC QueryHeapDesc;
+        QueryHeapDesc.Count = MaxNumTimers * 2;
+        QueryHeapDesc.NodeMask = 1;
+        QueryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+        ASSERT_SUCCEEDED(pCore->mDevice->CreateQueryHeap(&QueryHeapDesc, MY_IID_PPV_ARGS(&pGpuTimeManager->sm_QueryHeap)));
+        pGpuTimeManager->sm_QueryHeap->SetName(L"GpuTimeStamp QueryHeap");
+
+        pGpuTimeManager->sm_MaxNumTimers = (uint32_t)MaxNumTimers;
+    }
+
+    static void SetNativeResolution(sloGraphicsCore* pCore, sloCommandListManager* pCmdMgr)
+    {
+        uint32_t NativeWidth, NativeHeight;
+
+        switch (sloGraphicsCore::eResolution((int)pCore->TargetResolution))
+        {
+        default:
+        case sloGraphicsCore::k720p:
+            NativeWidth = 1280;
+            NativeHeight = 720;
+            break;
+        case sloGraphicsCore::k900p:
+            NativeWidth = 1600;
+            NativeHeight = 900;
+            break;
+        case sloGraphicsCore::k1080p:
+            NativeWidth = 1920;
+            NativeHeight = 1080;
+            break;
+        case sloGraphicsCore::k1440p:
+            NativeWidth = 2560;
+            NativeHeight = 1440;
+            break;
+        case sloGraphicsCore::k1800p:
+            NativeWidth = 3200;
+            NativeHeight = 1800;
+            break;
+        case sloGraphicsCore::k2160p:
+            NativeWidth = 3840;
+            NativeHeight = 2160;
+            break;
+        }
+
+        if (pCore->mNativeWidth == NativeWidth && pCore->mNativeHeight == NativeHeight)
+            return;
+
+        DEBUGPRINT("Changing native resolution to %ux%u", NativeWidth, NativeHeight);
+
+        pCore->mNativeWidth = NativeWidth;
+        pCore->mNativeHeight = NativeHeight;
+
+        slpCommandManagement::IdleGPU(pCmdMgr);
+
+        InitializeRenderingBuffers(NativeWidth, NativeHeight);
+    }
+
+    static void InitializeRenderingBuffers(sloBufferManager* pBufMgr, uint32_t bufferWidth, uint32_t bufferHeight)
+    {
+        GraphicsContext& InitContext = GraphicsContext::Begin();
+
+        const uint32_t bufferWidth1 = (bufferWidth + 1) / 2;
+        const uint32_t bufferWidth2 = (bufferWidth + 3) / 4;
+        const uint32_t bufferWidth3 = (bufferWidth + 7) / 8;
+        const uint32_t bufferWidth4 = (bufferWidth + 15) / 16;
+        const uint32_t bufferWidth5 = (bufferWidth + 31) / 32;
+        const uint32_t bufferWidth6 = (bufferWidth + 63) / 64;
+        const uint32_t bufferHeight1 = (bufferHeight + 1) / 2;
+        const uint32_t bufferHeight2 = (bufferHeight + 3) / 4;
+        const uint32_t bufferHeight3 = (bufferHeight + 7) / 8;
+        const uint32_t bufferHeight4 = (bufferHeight + 15) / 16;
+        const uint32_t bufferHeight5 = (bufferHeight + 31) / 32;
+        const uint32_t bufferHeight6 = (bufferHeight + 63) / 64;
+
+        EsramAllocator esram;
+
+        esram.PushStack();
+
+        pBufMgr->m_SceneColorBuffer.Create(L"Main Color Buffer", bufferWidth, bufferHeight, 1, DefaultHdrColorFormat, esram);
+        pBufMgr->m_VelocityBuffer.Create(L"Motion Vectors", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R32_UINT);
+        pBufMgr->m_PostEffectsBuffer.Create(L"Post Effects Buffer", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R32_UINT);
+
+        esram.PushStack();    // Render HDR image
+
+        pBufMgr->m_LinearDepth[0].Create(L"Linear Depth 0", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16_UNORM);
+        pBufMgr->m_LinearDepth[1].Create(L"Linear Depth 1", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16_UNORM);
+        pBufMgr->m_MinMaxDepth8.Create(L"MinMaxDepth 8x8", bufferWidth3, bufferHeight3, 1, DXGI_FORMAT_R32_UINT, esram);
+        pBufMgr->m_MinMaxDepth16.Create(L"MinMaxDepth 16x16", bufferWidth4, bufferHeight4, 1, DXGI_FORMAT_R32_UINT, esram);
+        pBufMgr->m_MinMaxDepth32.Create(L"MinMaxDepth 32x32", bufferWidth5, bufferHeight5, 1, DXGI_FORMAT_R32_UINT, esram);
+
+        pBufMgr->m_SceneDepthBuffer.Create(L"Scene Depth Buffer", bufferWidth, bufferHeight, DSV_FORMAT, esram);
+
+        esram.PushStack(); // Begin opaque geometry
+
+        esram.PushStack();    // Begin Shading
+
+        pBufMgr->m_SSAOFullScreen.Create(L"SSAO Full Res", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R8_UNORM);
+
+        esram.PushStack();    // Begin generating SSAO
+        pBufMgr->m_DepthDownsize1.Create(L"Depth Down-Sized 1", bufferWidth1, bufferHeight1, 1, DXGI_FORMAT_R32_FLOAT, esram);
+        pBufMgr->m_DepthDownsize2.Create(L"Depth Down-Sized 2", bufferWidth2, bufferHeight2, 1, DXGI_FORMAT_R32_FLOAT, esram);
+        pBufMgr->m_DepthDownsize3.Create(L"Depth Down-Sized 3", bufferWidth3, bufferHeight3, 1, DXGI_FORMAT_R32_FLOAT, esram);
+        pBufMgr->m_DepthDownsize4.Create(L"Depth Down-Sized 4", bufferWidth4, bufferHeight4, 1, DXGI_FORMAT_R32_FLOAT, esram);
+        pBufMgr->m_DepthTiled1.CreateArray(L"Depth De-Interleaved 1", bufferWidth3, bufferHeight3, 16, DXGI_FORMAT_R16_FLOAT, esram);
+        pBufMgr->m_DepthTiled2.CreateArray(L"Depth De-Interleaved 2", bufferWidth4, bufferHeight4, 16, DXGI_FORMAT_R16_FLOAT, esram);
+        pBufMgr->m_DepthTiled3.CreateArray(L"Depth De-Interleaved 3", bufferWidth5, bufferHeight5, 16, DXGI_FORMAT_R16_FLOAT, esram);
+        pBufMgr->m_DepthTiled4.CreateArray(L"Depth De-Interleaved 4", bufferWidth6, bufferHeight6, 16, DXGI_FORMAT_R16_FLOAT, esram);
+        pBufMgr->m_AOMerged1.Create(L"AO Re-Interleaved 1", bufferWidth1, bufferHeight1, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_AOMerged2.Create(L"AO Re-Interleaved 2", bufferWidth2, bufferHeight2, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_AOMerged3.Create(L"AO Re-Interleaved 3", bufferWidth3, bufferHeight3, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_AOMerged4.Create(L"AO Re-Interleaved 4", bufferWidth4, bufferHeight4, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_AOSmooth1.Create(L"AO Smoothed 1", bufferWidth1, bufferHeight1, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_AOSmooth2.Create(L"AO Smoothed 2", bufferWidth2, bufferHeight2, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_AOSmooth3.Create(L"AO Smoothed 3", bufferWidth3, bufferHeight3, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_AOHighQuality1.Create(L"AO High Quality 1", bufferWidth1, bufferHeight1, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_AOHighQuality2.Create(L"AO High Quality 2", bufferWidth2, bufferHeight2, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_AOHighQuality3.Create(L"AO High Quality 3", bufferWidth3, bufferHeight3, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_AOHighQuality4.Create(L"AO High Quality 4", bufferWidth4, bufferHeight4, 1, DXGI_FORMAT_R8_UNORM, esram);
+        esram.PopStack();    // End generating SSAO
+
+        pBufMgr->m_ShadowBuffer.Create(L"Shadow Map", 2048, 2048, esram);
+
+        esram.PopStack();    // End Shading
+
+        esram.PushStack();    // Begin depth of field
+        pBufMgr->m_DoFTileClass[0].Create(L"DoF Tile Classification Buffer 0", bufferWidth4, bufferHeight4, 1, DXGI_FORMAT_R11G11B10_FLOAT);
+        pBufMgr->m_DoFTileClass[1].Create(L"DoF Tile Classification Buffer 1", bufferWidth4, bufferHeight4, 1, DXGI_FORMAT_R11G11B10_FLOAT);
+
+        pBufMgr->m_DoFPresortBuffer.Create(L"DoF Presort Buffer", bufferWidth1, bufferHeight1, 1, DXGI_FORMAT_R11G11B10_FLOAT, esram);
+        pBufMgr->m_DoFPrefilter.Create(L"DoF PreFilter Buffer", bufferWidth1, bufferHeight1, 1, DXGI_FORMAT_R11G11B10_FLOAT, esram);
+        pBufMgr->m_DoFBlurColor[0].Create(L"DoF Blur Color", bufferWidth1, bufferHeight1, 1, DXGI_FORMAT_R11G11B10_FLOAT, esram);
+        pBufMgr->m_DoFBlurColor[1].Create(L"DoF Blur Color", bufferWidth1, bufferHeight1, 1, DXGI_FORMAT_R11G11B10_FLOAT, esram);
+        pBufMgr->m_DoFBlurAlpha[0].Create(L"DoF FG Alpha", bufferWidth1, bufferHeight1, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_DoFBlurAlpha[1].Create(L"DoF FG Alpha", bufferWidth1, bufferHeight1, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_DoFWorkQueue.Create(L"DoF Work Queue", bufferWidth4 * bufferHeight4, 4, esram);
+        pBufMgr->m_DoFFastQueue.Create(L"DoF Fast Queue", bufferWidth4 * bufferHeight4, 4, esram);
+        pBufMgr->m_DoFFixupQueue.Create(L"DoF Fixup Queue", bufferWidth4 * bufferHeight4, 4, esram);
+        esram.PopStack();    // End depth of field
+
+        pBufMgr->m_TemporalColor[0].Create(L"Temporal Color 0", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        pBufMgr->m_TemporalColor[1].Create(L"Temporal Color 1", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        TemporalEffects::ClearHistory(InitContext);
+
+        esram.PushStack();    // Begin motion blur
+        pBufMgr->m_MotionPrepBuffer.Create(L"Motion Blur Prep", bufferWidth1, bufferHeight1, 1, HDR_MOTION_FORMAT, esram);
+        esram.PopStack();    // End motion blur
+
+        esram.PopStack();    // End opaque geometry
+
+        esram.PopStack();    // End HDR image
+
+        esram.PushStack();    // Begin post processing
+
+            // This is useful for storing per-pixel weights such as motion strength or pixel luminance
+        pBufMgr->m_LumaBuffer.Create(L"Luminance", bufferWidth, bufferHeight, 1, DXGI_FORMAT_R8_UNORM, esram);
+        pBufMgr->m_Histogram.Create(L"Histogram", 256, 4, esram);
+
+        // Divisible by 128 so that after dividing by 16, we still have multiples of 8x8 tiles.  The bloom
+        // dimensions must be at least 1/4 native resolution to avoid undersampling.
+        //uint32_t kBloomWidth = bufferWidth > 2560 ? Math::AlignUp(bufferWidth / 4, 128) : 640;
+        //uint32_t kBloomHeight = bufferHeight > 1440 ? Math::AlignUp(bufferHeight / 4, 128) : 384;
+        uint32_t kBloomWidth = bufferWidth > 2560 ? 1280 : 640;
+        uint32_t kBloomHeight = bufferHeight > 1440 ? 768 : 384;
+
+        esram.PushStack();    // Begin bloom and tone mapping
+        pBufMgr->m_LumaLR.Create(L"Luma Buffer", kBloomWidth, kBloomHeight, 1, DXGI_FORMAT_R8_UINT, esram);
+        pBufMgr->m_aBloomUAV1[0].Create(L"Bloom Buffer 1a", kBloomWidth, kBloomHeight, 1, DefaultHdrColorFormat, esram);
+        pBufMgr->m_aBloomUAV1[1].Create(L"Bloom Buffer 1b", kBloomWidth, kBloomHeight, 1, DefaultHdrColorFormat, esram);
+        pBufMgr->m_aBloomUAV2[0].Create(L"Bloom Buffer 2a", kBloomWidth / 2, kBloomHeight / 2, 1, DefaultHdrColorFormat, esram);
+        pBufMgr->m_aBloomUAV2[1].Create(L"Bloom Buffer 2b", kBloomWidth / 2, kBloomHeight / 2, 1, DefaultHdrColorFormat, esram);
+        pBufMgr->m_aBloomUAV3[0].Create(L"Bloom Buffer 3a", kBloomWidth / 4, kBloomHeight / 4, 1, DefaultHdrColorFormat, esram);
+        pBufMgr->m_aBloomUAV3[1].Create(L"Bloom Buffer 3b", kBloomWidth / 4, kBloomHeight / 4, 1, DefaultHdrColorFormat, esram);
+        pBufMgr->m_aBloomUAV4[0].Create(L"Bloom Buffer 4a", kBloomWidth / 8, kBloomHeight / 8, 1, DefaultHdrColorFormat, esram);
+        pBufMgr->m_aBloomUAV4[1].Create(L"Bloom Buffer 4b", kBloomWidth / 8, kBloomHeight / 8, 1, DefaultHdrColorFormat, esram);
+        pBufMgr->m_aBloomUAV5[0].Create(L"Bloom Buffer 5a", kBloomWidth / 16, kBloomHeight / 16, 1, DefaultHdrColorFormat, esram);
+        pBufMgr->m_aBloomUAV5[1].Create(L"Bloom Buffer 5b", kBloomWidth / 16, kBloomHeight / 16, 1, DefaultHdrColorFormat, esram);
+        esram.PopStack();    // End tone mapping
+
+        esram.PushStack();    // Begin antialiasing
+        const uint32_t kFXAAWorkSize = bufferWidth * bufferHeight / 4 + 128;
+        pBufMgr->m_FXAAWorkQueue.Create(L"FXAA Work Queue", kFXAAWorkSize, sizeof(uint32_t), esram);
+        pBufMgr->m_FXAAColorQueue.Create(L"FXAA Color Queue", kFXAAWorkSize, sizeof(uint32_t), esram);
+        pBufMgr->m_FXAAWorkCounters.Create(L"FXAA Work Counters", 2, sizeof(uint32_t));
+        InitContext.ClearUAV(pBufMgr->m_FXAAWorkCounters);
+        esram.PopStack();    // End antialiasing
+
+        esram.PopStack();    // End post processing
+
+        esram.PushStack(); // GenerateMipMaps() test
+        pBufMgr->m_GenMipsBuffer.Create(L"GenMips", bufferWidth, bufferHeight, 0, DXGI_FORMAT_R11G11B10_FLOAT, esram);
+        esram.PopStack();
+
+        pBufMgr->m_OverlayBuffer.Create(L"UI Overlay", pBufMgr->m_DisplayWidth, pBufMgr->m_DisplayHeight, 1, DXGI_FORMAT_R8G8B8A8_UNORM, esram);
+        pBufMgr->m_HorizontalBuffer.Create(L"Bicubic Intermediate", pBufMgr->m_DisplayWidth, bufferHeight, 1, DefaultHdrColorFormat, esram);
+
+        esram.PopStack(); // End final image
+
+        InitContext.Finish();
+    }
+
 };
